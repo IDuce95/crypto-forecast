@@ -1,0 +1,6 @@
+[submodule "app/custom-logger"]
+	path = app/custom-logger
+	url = git@github.com:IDuce95/custom-logger.git
+[submodule "app/metrics-calculator"]
+	path = app/metrics-calculator
+	url = git@github.com:IDuce95/metrics-calculator.git

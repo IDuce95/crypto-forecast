@@ -1,0 +1,10 @@
+artifact_location: file:///home/palianm/Desktop/crypto-forecasting/mlruns/548220495615055768/models/m-696e3cd12f6f4414888c9debe243625d/artifacts
+creation_timestamp: 1753688123860
+experiment_id: '548220495615055768'
+last_updated_timestamp: 1753688126227
+model_id: m-696e3cd12f6f4414888c9debe243625d
+model_type: null
+name: random_forest_Bitcoin
+source_run_id: 9810ec79a0eb40d7b1f1964d208bff6d
+status: 2
+status_message: null

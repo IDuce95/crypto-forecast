@@ -1,0 +1,19 @@
+.ipynb_checkpoints
+__pycache__/
+
+# Environment files
+.env
+.env.local
+.env.dev
+.env.prod
+.env.test
+
+# Development
+venv
+todo.txt
+plan.txt
+.vscode
+
+# Logs
+logs/
+*.log

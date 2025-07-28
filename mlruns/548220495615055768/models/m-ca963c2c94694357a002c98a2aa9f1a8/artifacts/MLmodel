@@ -1,0 +1,22 @@
+artifact_path: file:///home/palianm/Desktop/crypto-forecasting/mlruns/548220495615055768/models/m-ca963c2c94694357a002c98a2aa9f1a8/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.12.7
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.7.0
+mlflow_version: 3.1.4
+model_id: m-ca963c2c94694357a002c98a2aa9f1a8
+model_size_bytes: 3397487
+model_uuid: m-ca963c2c94694357a002c98a2aa9f1a8
+prompts: null
+run_id: f3b9838241db45bab38c557f58a38aab
+utc_time_created: '2025-07-28 07:49:25.415364'

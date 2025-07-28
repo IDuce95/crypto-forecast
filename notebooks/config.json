@@ -1,0 +1,7 @@
+{
+    "raw_data_path": "data/raw/",
+    "processed_data_path": "data/processed/",
+    "date_column": "Date",
+    "columns_to_drop": ["SNo", "Name", "Symbol", "Volume", "Marketcap"],
+    "minimum_data_length_in_years": 5
+}

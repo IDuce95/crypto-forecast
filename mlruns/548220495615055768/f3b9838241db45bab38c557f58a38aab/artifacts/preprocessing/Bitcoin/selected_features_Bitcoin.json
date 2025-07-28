@@ -1,0 +1,17 @@
+[
+  "MA_5",
+  "MA_10",
+  "MA_20",
+  "EMA_12",
+  "EMA_26",
+  "BB_upper",
+  "BB_middle",
+  "close_lag_1",
+  "close_lag_2",
+  "close_lag_3",
+  "close_min_5",
+  "close_max_5",
+  "close_min_10",
+  "close_max_10",
+  "close_max_20"
+]

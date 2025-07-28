@@ -1,0 +1,31 @@
+{
+  "model_type": "random_forest",
+  "training_timestamp": "2025-07-28T09:35:23.772283",
+  "cv_folds": 3,
+  "hyperparameter_tuning": false,
+  "train_metrics": "TrainingMetrics(mse=23923.5877101501, mae=48.007625860246684, rmse=np.float64(154.67251763047662), r2=0.9978971112212729, mape=np.float64(2.3813528015232053))",
+  "validation_metrics": "TrainingMetrics(mse=263184.8557408557, mae=371.3961087365511, rmse=np.float64(513.0154537056907), r2=0.9587072119217812, mape=np.float64(5.932938266669876))",
+  "test_metrics": "TrainingMetrics(mse=518931040.36428446, mae=12281.033260772514, rmse=np.float64(22780.057953488275), r2=-0.7044056391009317, mape=np.float64(28.642787359119215))",
+  "data_shape": {
+    "train": [
+      1914,
+      15
+    ],
+    "val": [
+      478,
+      15
+    ],
+    "test": [
+      598,
+      15
+    ]
+  },
+  "best_params": {
+    "n_estimators": 100,
+    "max_depth": 10,
+    "min_samples_split": 5,
+    "min_samples_leaf": 2,
+    "random_state": 42,
+    "n_jobs": -1
+  }
+}

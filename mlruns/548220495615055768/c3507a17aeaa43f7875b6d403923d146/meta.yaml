@@ -1,0 +1,14 @@
+artifact_uri: file:///home/palianm/Desktop/crypto-forecasting/mlruns/548220495615055768/c3507a17aeaa43f7875b6d403923d146/artifacts
+end_time: 1753689141846
+entry_point_name: ''
+experiment_id: '548220495615055768'
+lifecycle_stage: active
+run_id: c3507a17aeaa43f7875b6d403923d146
+run_name: test_run_faza3
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1753689138860
+status: 3
+tags: []
+user_id: palianm

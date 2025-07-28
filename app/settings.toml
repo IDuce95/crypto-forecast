@@ -1,0 +1,91 @@
+[default]
+[default.rest_api_settings]
+backend_hostname = "localhost"
+backend_container_name = "backend"
+port = 5000
+
+[default.api_endpoints]
+train_dt_endpoint = "/train/decision_tree"
+train_rf_endpoint = "/train/random_forest"
+train_xgb_endpoint = "/train/xgboost"
+train_lasso_endpoint = "/train/lasso"
+optimize_dt_endpoint = "/optimize/decision_tree"
+optimize_rf_endpoint = "/optimize/random_forest"
+optimize_xgb_endpoint = "/optimize/xgboost"
+optimize_lasso_endpoint = "/optimize/lasso"
+
+[default.data_settings]
+processed_data_path = "./data/processed/"
+raw_data_path = "./data/raw/"
+date_column = "Date"
+columns_to_drop = ["Volume"]
+min_data_length_years = 2
+
+[default.database]
+type = "sqlite"
+path = "./crypto_forecasting.db"
+host = "localhost"
+port = 5432
+name = "crypto_forecasting"
+user = "postgres"
+password = ""
+
+[default.model_settings]
+default_test_size = 0.2
+default_validation_size = 0.2
+random_state = 42
+feature_engineering_window = 7
+target_column = "Close"
+prediction_horizon = 1
+
+[default.ml_pipeline]
+models_output_dir = "./models/"
+predictions_output_dir = "./predictions/"
+metrics_output_dir = "./metrics/"
+cross_validation_folds = 5
+enable_feature_selection = true
+enable_hyperparameter_tuning = true
+
+[default.logging]
+level = "INFO"
+format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+file_path = "./logs/app.log"
+
+[default.other]
+gitkeep_filename = ".gitkeep"
+
+[development]
+
+[development.rest_api_settings]
+backend_hostname = "localhost"
+backend_container_name = "backend"
+port = 5000
+
+[development.database]
+type = "sqlite"
+path = "./crypto_forecasting_dev.db"
+
+[development.logging]
+level = "DEBUG"
+format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+file_path = "./logs/app_dev.log"
+
+[production]
+
+[production.rest_api_settings]
+backend_hostname = "0.0.0.0"
+backend_container_name = "backend"
+port = 5000
+
+[production.database]
+type = "postgresql"
+host = "db"
+port = 5432
+name = "crypto_forecasting"
+user = "postgres"
+password = "prod_password"
+
+[production.logging]
+level = "INFO"
+format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+file_path = "/app/logs/app.log"
