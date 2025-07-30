@@ -511,34 +511,3 @@ class DataPreprocessor:
         logger.info(f"Preprocessor loaded from {file_path}")
 
 if __name__ == "__main__":
-    """Test the data preprocessor."""
-
-    test_config = PreprocessingConfig(
-        test_size=0.2,
-        validation_size=0.2,
-        feature_window=7,
-        max_features=30
-    )
-
-    preprocessor = DataPreprocessor(test_config)
-
-    try:
-        preprocessed_data = preprocessor.preprocess("Bitcoin")
-
-        print("\n" + "="*50)
-        print("PREPROCESSING RESULTS")
-        print("="*50)
-
-        print(f"Symbol: {preprocessed_data.metadata['symbol']}")
-        print(f"Train shape: {preprocessed_data.X_train.shape}")
-        print(f"Validation shape: {preprocessed_data.X_val.shape}")
-        print(f"Test shape: {preprocessed_data.X_test.shape}")
-        print(f"Selected features: {len(preprocessed_data.metadata['selected_features'])}")
-
-        print("\nTop 10 selected features:")
-        for i, feature in enumerate(preprocessed_data.metadata['selected_features'][:10]):
-            print(f"  {i+1}. {feature}")
-
-    except Exception as e:
-        logger.error(f"Preprocessing test failed: {e}")
-        print(f"Error: {e}")

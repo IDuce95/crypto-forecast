@@ -9,11 +9,20 @@ from pathlib import Path
 import pickle
 import warnings
 from datetime import datetime, timedelta
+import hashlib
+import json
 
 from app.config import config
 from app.logger import logger
 from app.ml_preprocessor import DataPreprocessor, PreprocessedData
 from app.ml_model_trainer import ModelTrainer, ModelResults, MultiModelTrainer
+
+try:
+    from app.cache_manager import cache_manager
+    CACHE_AVAILABLE = True
+except ImportError:
+    CACHE_AVAILABLE = False
+    cache_manager = None
 
 @dataclass
 class PredictionConfig:
@@ -411,51 +420,3 @@ class PredictionGenerator:
         logger.info(f"Predictions saved to {file_path}")
 
 if __name__ == "__main__":
-    """Test the prediction generator."""
-    from app.ml_preprocessor import DataPreprocessor, PreprocessingConfig
-    from app.ml_model_trainer import ModelTrainer, ModelConfig
-    
-    try:
-        preprocessing_config = PreprocessingConfig(
-            test_size=0.2,
-            validation_size=0.2,
-            feature_window=7,
-            max_features=20
-        )
-        
-        preprocessor = DataPreprocessor(preprocessing_config)
-        preprocessed_data = preprocessor.preprocess("Bitcoin")
-        
-        model_config = ModelConfig(
-            model_type="random_forest",
-            enable_hyperparameter_tuning=False
-        )
-        
-        trainer = ModelTrainer(model_config)
-        results = trainer.train_model(preprocessed_data)
-        
-        pred_config = PredictionConfig(
-            prediction_horizon=1,
-            enable_ensemble=False
-        )
-        
-        generator = PredictionGenerator(pred_config)
-        generator.add_trained_model("random_forest", trainer)
-        
-        next_pred = generator.predict_next_value("Bitcoin", preprocessor)
-        
-        print("\n" + "=" * 50)
-        print("PREDICTION RESULTS")
-        print("=" * 50)
-        
-        print(f"Symbol: {next_pred.symbol}")
-        print(f"Prediction timestamp: {next_pred.timestamp}")
-        print(f"Predicted value: ${next_pred.predicted_value:.2f}")
-        print(f"Model used: {next_pred.model_used}")
-        
-        if next_pred.confidence_lower and next_pred.confidence_upper:
-            print(f"Confidence interval: ${next_pred.confidence_lower:.2f} - ${next_pred.confidence_upper:.2f}")
-        
-    except Exception as e:
-        logger.error(f"Prediction test failed: {e}")
-        print(f"Error: {e}")

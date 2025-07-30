@@ -180,23 +180,3 @@ def close_database() -> None:
         logger.info("Database connections closed")
 
 if __name__ == "__main__":
-    """Test database connection and setup."""
-    try:
-        init_database(create_tables=True)
-        print("Database setup completed successfully!")
-
-        from app.database.models import DataSource
-
-        with db_manager.session_scope() as session:
-            test_source = DataSource(
-                name="test_source",
-                description="Test data source for validation"
-            )
-            session.add(test_source)
-
-            sources = session.query(DataSource).all()
-            print(f"Found {len(sources)} data sources")
-
-    except Exception as e:
-        print(f"Database setup failed: {e}")
-        raise

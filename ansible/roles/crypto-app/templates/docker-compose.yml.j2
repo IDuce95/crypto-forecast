@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: crypto-postgres
+    environment:
+      POSTGRES_DB: {{ postgres_db | default('crypto_forecasting') }}
+      POSTGRES_USER: {{ postgres_user | default('postgres') }}
+      POSTGRES_PASSWORD: {{ postgres_password | default('postgres123') }}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "{{ postgres_port }}:5432"
+    networks:
+      - crypto_network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: crypto-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "{{ redis_port }}:6379"
+    networks:
+      - crypto_network
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: app/Dockerfile.backend
+    container_name: crypto-ml-backend
+    environment:
+      - DATABASE_URL=postgresql://{{ postgres_user | default('postgres') }}:{{ postgres_password | default('postgres123') }}@postgres:5432/{{ postgres_db | default('crypto_forecasting') }}
+      - REDIS_URL=redis://redis:6379/1
+      - PYTHONPATH=/app
+      - ENV={{ environment | default('production') }}
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./logs:/app/logs
+    ports:
+      - "{{ app_port }}:5000"
+    networks:
+      - crypto_network
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+{% if enable_frontend | default(true) %}
+  frontend:
+    build:
+      context: .
+      dockerfile: app/Dockerfile.frontend
+    container_name: crypto-frontend
+    environment:
+      - REACT_APP_API_URL=http://localhost:{{ app_port }}
+    ports:
+      - "3000:3000"
+    networks:
+      - crypto_network
+    depends_on:
+      - backend
+    restart: unless-stopped
+{% endif %}
+
+{% if enable_airflow | default(false) %}
+  airflow:
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile.airflow
+    container_name: crypto-airflow
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://{{ postgres_user | default('postgres') }}:{{ postgres_password | default('postgres123') }}@postgres:5432/{{ postgres_db | default('crypto_forecasting') }}
+      - AIRFLOW__CORE__FERNET_KEY={{ airflow_fernet_key | default('') }}
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./data:/opt/airflow/data
+    ports:
+      - "8080:8080"
+    networks:
+      - crypto_network
+    depends_on:
+      - postgres
+    restart: unless-stopped
+{% endif %}
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  crypto_network:
+    driver: bridge

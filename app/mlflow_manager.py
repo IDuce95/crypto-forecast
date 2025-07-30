@@ -344,38 +344,3 @@ def setup_mlflow(experiment_name: str = "crypto-forecasting") -> MLflowManager:
     return MLflowManager(experiment_name=experiment_name)
 
 if __name__ == "__main__":
-    """Test MLflow integration."""
-    
-    print("Testing MLflow integration...")
-    
-    try:
-        with setup_mlflow("test-experiment") as mlflow_manager:
-            run_id = mlflow_manager.start_run("test_run")
-            print(f"Started test run: {run_id}")
-            
-            test_params = {
-                "learning_rate": 0.01,
-                "batch_size": 32,
-                "model_type": "random_forest"
-            }
-            mlflow_manager.log_params(test_params)
-            
-            test_metrics = {
-                "accuracy": 0.95,
-                "loss": 0.05,
-                "f1_score": 0.92
-            }
-            mlflow_manager.log_metrics(test_metrics)
-            
-            test_artifacts = {
-                "config": {"test": True, "version": "1.0"},
-                "results": [1, 2, 3, 4, 5]
-            }
-            mlflow_manager.log_artifacts(test_artifacts)
-            
-            print("✅ MLflow integration test completed successfully!")
-            print(f"MLflow UI available at: {mlflow.get_tracking_uri()}")
-            
-    except Exception as e:
-        print(f"❌ MLflow integration test failed: {e}")
-        raise

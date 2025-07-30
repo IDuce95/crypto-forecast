@@ -14,6 +14,7 @@ from app.ml_preprocessor import DataPreprocessor, PreprocessingConfig, Preproces
 from app.ml_model_trainer import ModelTrainer, ModelConfig, MultiModelTrainer, ModelResults
 from app.ml_prediction_generator import PredictionGenerator, PredictionConfig, BatchPredictions
 from app.mlflow_manager import MLflowManager, setup_mlflow
+from app.pyspark_manager import PySparkManager, PySparkDataProcessor
 
 @dataclass
 class PipelineConfig:
@@ -489,42 +490,3 @@ def create_default_pipeline() -> MLPipeline:
     return MLPipeline(config)
 
 if __name__ == "__main__":
-    """Test the complete ML pipeline."""
-    
-    try:
-        test_config = PipelineConfig(
-            symbols=["Bitcoin"],
-            model_types=["random_forest"],
-            enable_hyperparameter_tuning=False,
-            enable_ensemble=False,
-            test_size=0.2,
-            validation_size=0.2,
-            feature_window=5
-        )
-        
-        pipeline = MLPipeline(test_config)
-        results = pipeline.run_complete_pipeline(prediction_period_days=10)
-        
-        print("\n" + "=" * 60)
-        print("ML PIPELINE EXECUTION RESULTS")
-        print("=" * 60)
-        
-        print(f"Experiment ID: {results.experiment_id}")
-        print(f"Duration: {results.metadata['duration_seconds']:.2f} seconds")
-        print(f"Symbols processed: {results.summary_metrics['experiment_overview']['symbols_processed']}")
-        print(f"Models trained: {results.summary_metrics['experiment_overview']['total_models_trained']}")
-        print(f"Predictions generated: {results.summary_metrics['experiment_overview']['total_predictions_generated']}")
-        
-        print("\nBest models per symbol:")
-        for symbol, best_model in results.summary_metrics['best_models'].items():
-            print(f"  {symbol}: {best_model['model_type']} (R²: {best_model['test_r2']:.4f})")
-        
-        print("\nPrediction summary:")
-        for symbol, pred_summary in results.summary_metrics['prediction_summary'].items():
-            print(f"  {symbol}: {pred_summary['total_predictions']} predictions")
-            if pred_summary['prediction_mse']:
-                print(f"    MSE: {pred_summary['prediction_mse']:.4f}")
-        
-    except Exception as e:
-        logger.error(f"Pipeline test failed: {e}")
-        print(f"Error: {e}")

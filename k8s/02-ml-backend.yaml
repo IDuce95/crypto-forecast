@@ -1,0 +1,230 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: crypto-forecasting
+  labels:
+    environment: dev
+data:
+  settings.toml: |
+    [default]
+    [default.rest_api_settings]
+    backend_hostname = "0.0.0.0"
+    port = 5000
+    
+    [default.data_settings]
+    processed_data_path = "/app/data/processed/"
+    raw_data_path = "/app/data/raw/"
+    
+    [default.database]
+    type = "postgresql"
+    host = "postgres"
+    port = 5432
+    name = "crypto_forecasting"
+    user = "crypto"
+    password = "crypto123"
+    
+    [default.redis]
+    host = "redis"
+    port = 6379
+    db = 0
+    
+    [default.environment]
+    type = "dev"
+    debug = true
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backend-secrets
+  namespace: crypto-forecasting
+  labels:
+    environment: dev
+type: Opaque
+data:
+  database-url: cG9zdGdyZXNxbDovL2NyeXB0bzpjcnlwdG8xMjNAcG9zdGdyZXM6NTQzMi9jcnlwdG9fZm9yZWNhc3Rpbmc=  # postgresql://crypto:crypto123@postgres:5432/crypto_forecasting
+  redis-url: cmVkaXM6Ly9yZWRpczozNjc5LzA=  # redis://redis:6379/0
+  secret-key: Y3J5cHRvLWZvcmVjYXN0aW5nLXNlY3JldC1rZXk=  # crypto-forecasting-secret-key
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-pvc
+  namespace: crypto-forecasting
+  labels:
+    environment: dev
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi  # Reduced size for dev
+  storageClassName: standard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: models-pvc
+  namespace: crypto-forecasting
+  labels:
+    environment: dev
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi  # Reduced size for dev
+  storageClassName: standard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: logs-pvc
+  namespace: crypto-forecasting
+  labels:
+    environment: dev
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Mi  # Reduced size for dev
+  storageClassName: standard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: crypto-forecasting
+  labels:
+    app: backend
+    environment: dev
+spec:
+  replicas: 1  # Single replica for dev
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      serviceAccountName: crypto-forecasting-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: backend
+        image: crypto-forecasting/backend:dev
+        imagePullPolicy: Never  # Use dev images
+        ports:
+        - containerPort: 5000
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: backend-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: backend-secrets
+              key: redis-url
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: backend-secrets
+              key: secret-key
+        - name: PYTHONPATH
+          value: "/app"
+        - name: LOG_LEVEL
+          value: "DEBUG"  # Debug level for dev
+        - name: ENVIRONMENT
+          value: "dev"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 60  # Longer delay for dev development
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m     # Reduced for dev
+            memory: 1Gi
+          requests:
+            cpu: 100m     # Lower requests for dev
+            memory: 256Mi
+        volumeMounts:
+        - name: data
+          mountPath: /app/data
+        - name: models
+          mountPath: /app/models
+        - name: logs
+          mountPath: /app/logs
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: data-pvc
+      - name: models
+        persistentVolumeClaim:
+          claimName: models-pvc
+      - name: logs
+        persistentVolumeClaim:
+          claimName: logs-pvc
+      - name: config
+        configMap:
+          name: backend-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: crypto-forecasting
+  labels:
+    app: backend
+    environment: dev
+spec:
+  type: NodePort  # Use NodePort for dev access
+  selector:
+    app: backend
+  ports:
+    - protocol: TCP
+      port: 5000
+      targetPort: 5000
+      nodePort: 30050  # Fixed port for dev access
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend-hpa
+  namespace: crypto-forecasting
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

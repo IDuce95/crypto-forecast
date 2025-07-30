@@ -1,0 +1,1143 @@
+---
+- name: Crypto Forecasting - Disaster Recovery Implementation
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    environment: dev
+    namespace: crypto-forecasting
+    recovery_config:
+      max_downtime_minutes: 30
+      priority_services: ["postgres", "redis", "backend"]
+      monitoring_interval: 30
+      
+  tasks:
+    - name: Create disaster recovery directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "/opt/crypto-forecasting/disaster-recovery"
+        - "/opt/crypto-forecasting/disaster-recovery/scripts"
+        - "/opt/crypto-forecasting/disaster-recovery/configs"
+        - "/opt/crypto-forecasting/disaster-recovery/logs"
+
+    - name: Create health check script
+      copy:
+        content: |
+          #!/bin/bash
+          
+          # Health Check Script for Disaster Recovery
+          
+          NAMESPACE="{{ namespace }}"
+          LOG_FILE="/opt/crypto-forecasting/disaster-recovery/logs/health-check.log"
+          
+          log_message() {
+              echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+          }
+          
+          check_service_health() {
+              local service_name=$1
+              local max_attempts=${2:-3}
+              local attempt=1
+              
+              log_message "Checking health of $service_name..."
+              
+              while [ $attempt -le $max_attempts ]; do
+                  if kubectl get pods -n $NAMESPACE -l app=$service_name | grep -q "Running"; then
+                      log_message "$service_name is healthy (attempt $attempt)"
+                      return 0
+                  fi
+                  
+                  log_message "$service_name check failed (attempt $attempt/$max_attempts)"
+                  sleep 10
+                  ((attempt++))
+              done
+              
+              log_message "$service_name is unhealthy after $max_attempts attempts"
+              return 1
+          }
+          
+          check_database_connectivity() {
+              log_message "Checking database connectivity..."
+              
+              kubectl exec -n $NAMESPACE deployment/postgres -- pg_isready -U crypto &>/dev/null
+              if [ $? -eq 0 ]; then
+                  log_message "PostgreSQL is accessible"
+                  return 0
+              else
+                  log_message "PostgreSQL is not accessible"
+                  return 1
+              fi
+          }
+          
+          check_redis_connectivity() {
+              log_message "Checking Redis connectivity..."
+              
+              kubectl exec -n $NAMESPACE deployment/redis -- redis-cli ping | grep -q "PONG"
+              if [ $? -eq 0 ]; then
+                  log_message "Redis is accessible"
+                  return 0
+              else
+                  log_message "Redis is not accessible"
+                  return 1
+              fi
+          }
+          
+          check_api_endpoints() {
+              log_message "Checking API endpoints..."
+              
+              # Get backend service details
+              BACKEND_PORT=$(kubectl get svc -n $NAMESPACE backend -o jsonpath='{.spec.ports[0].nodePort}')
+              
+              if [ ! -z "$BACKEND_PORT" ]; then
+                  curl -s "http://localhost:$BACKEND_PORT/health" &>/dev/null
+                  if [ $? -eq 0 ]; then
+                      log_message "Backend API is accessible on port $BACKEND_PORT"
+                      return 0
+                  else
+                      log_message "Backend API is not accessible on port $BACKEND_PORT"
+                      return 1
+                  fi
+              else
+                  log_message "Backend service not found"
+                  return 1
+              fi
+          }
+          
+          generate_health_report() {
+              local failed_services=("$@")
+              
+              if [ ${#failed_services[@]} -eq 0 ]; then
+                  log_message "========================================="
+                  log_message "HEALTH CHECK PASSED - All services healthy"
+                  log_message "========================================="
+                  return 0
+              else
+                  log_message "========================================="
+                  log_message "HEALTH CHECK FAILED - Issues detected:"
+                  for service in "${failed_services[@]}"; do
+                      log_message "  - $service"
+                  done
+                  log_message "========================================="
+                  return 1
+              fi
+          }
+          
+          # Main health check execution
+          failed_services=()
+          
+          log_message "Starting comprehensive health check..."
+          
+          # Check core services
+          for service in postgres redis backend frontend; do
+              if ! check_service_health "$service"; then
+                  failed_services+=("$service pod")
+              fi
+          done
+          
+          # Check database connectivity
+          if ! check_database_connectivity; then
+              failed_services+=("PostgreSQL connectivity")
+          fi
+          
+          # Check Redis connectivity
+          if ! check_redis_connectivity; then
+              failed_services+=("Redis connectivity")
+          fi
+          
+          # Check API endpoints
+          if ! check_api_endpoints; then
+              failed_services+=("API endpoints")
+          fi
+          
+          # Generate final report
+          generate_health_report "${failed_services[@]}"
+          
+        dest: /opt/crypto-forecasting/disaster-recovery/scripts/health-check.sh
+        mode: '0755'
+
+    - name: Create automatic recovery script
+      copy:
+        content: |
+          #!/bin/bash
+          
+          # Automatic Recovery Script
+          
+          NAMESPACE="{{ namespace }}"
+          LOG_FILE="/opt/crypto-forecasting/disaster-recovery/logs/auto-recovery.log"
+          MAX_RECOVERY_ATTEMPTS=3
+          
+          log_message() {
+              echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+          }
+          
+          restart_service() {
+              local service_name=$1
+              local attempt=1
+              
+              log_message "Attempting to restart $service_name..."
+              
+              while [ $attempt -le $MAX_RECOVERY_ATTEMPTS ]; do
+                  log_message "Restart attempt $attempt for $service_name"
+                  
+                  # Scale down and up to force restart
+                  kubectl scale deployment -n $NAMESPACE $service_name --replicas=0
+                  sleep 30
+                  kubectl scale deployment -n $NAMESPACE $service_name --replicas=1
+                  
+                  # Wait for pod to be ready
+                  sleep 60
+                  
+                  # Check if service is healthy
+                  if kubectl get pods -n $NAMESPACE -l app=$service_name | grep -q "Running"; then
+                      log_message "$service_name restarted successfully"
+                      return 0
+                  fi
+                  
+                  ((attempt++))
+                  sleep 30
+              done
+              
+              log_message "Failed to restart $service_name after $MAX_RECOVERY_ATTEMPTS attempts"
+              return 1
+          }
+          
+          recover_database() {
+              log_message "Starting database recovery procedure..."
+              
+              # Check if PostgreSQL pod exists
+              if ! kubectl get pods -n $NAMESPACE -l app=postgres &>/dev/null; then
+                  log_message "PostgreSQL pod not found - attempting to recreate"
+                  kubectl apply -f /home/palianm/Desktop/crypto-forecasting/k8s/01-database-redis.yaml
+                  sleep 60
+              fi
+              
+              # Restart PostgreSQL service
+              if ! restart_service "postgres"; then
+                  log_message "Database recovery failed - manual intervention required"
+                  return 1
+              fi
+              
+              # Verify database connectivity
+              sleep 30
+              kubectl exec -n $NAMESPACE deployment/postgres -- pg_isready -U crypto
+              if [ $? -eq 0 ]; then
+                  log_message "Database recovery completed successfully"
+                  return 0
+              else
+                  log_message "Database recovery verification failed"
+                  return 1
+              fi
+          }
+          
+          recover_redis() {
+              log_message "Starting Redis recovery procedure..."
+              
+              # Check if Redis pod exists
+              if ! kubectl get pods -n $NAMESPACE -l app=redis &>/dev/null; then
+                  log_message "Redis pod not found - attempting to recreate"
+                  kubectl apply -f /home/palianm/Desktop/crypto-forecasting/k8s/01-database-redis.yaml
+                  sleep 60
+              fi
+              
+              # Restart Redis service
+              if ! restart_service "redis"; then
+                  log_message "Redis recovery failed - manual intervention required"
+                  return 1
+              fi
+              
+              # Verify Redis connectivity
+              sleep 30
+              kubectl exec -n $NAMESPACE deployment/redis -- redis-cli ping | grep -q "PONG"
+              if [ $? -eq 0 ]; then
+                  log_message "Redis recovery completed successfully"
+                  return 0
+              else
+                  log_message "Redis recovery verification failed"
+                  return 1
+              fi
+          }
+          
+          recover_backend() {
+              log_message "Starting backend recovery procedure..."
+              
+              # Check if backend pod exists
+              if ! kubectl get pods -n $NAMESPACE -l app=backend &>/dev/null; then
+                  log_message "Backend pod not found - attempting to recreate"
+                  kubectl apply -f /home/palianm/Desktop/crypto-forecasting/k8s/02-ml-backend.yaml
+                  sleep 60
+              fi
+              
+              # Restart backend service
+              if ! restart_service "backend"; then
+                  log_message "Backend recovery failed - manual intervention required"
+                  return 1
+              fi
+              
+              log_message "Backend recovery completed"
+              return 0
+          }
+          
+          emergency_rollback() {
+              log_message "Starting emergency rollback procedure..."
+              
+              # Save current state
+              kubectl get all -n $NAMESPACE -o yaml > "/opt/crypto-forecasting/disaster-recovery/logs/pre-rollback-state-$(date +%Y%m%d_%H%M%S).yaml"
+              
+              # Delete and recreate namespace
+              log_message "Recreating namespace $NAMESPACE"
+              kubectl delete namespace $NAMESPACE --force --grace-period=0
+              sleep 30
+              kubectl create namespace $NAMESPACE
+              
+              # Redeploy all services
+              log_message "Redeploying all services..."
+              kubectl apply -f /home/palianm/Desktop/crypto-forecasting/k8s/
+              
+              # Wait for services to be ready
+              log_message "Waiting for services to be ready..."
+              sleep 120
+              
+              # Restore from latest backup if available
+              if [ -f "/opt/crypto-forecasting/disaster-recovery.sh" ]; then
+                  log_message "Attempting to restore from latest backup..."
+                  /opt/crypto-forecasting/disaster-recovery.sh full-restore latest
+              fi
+              
+              log_message "Emergency rollback completed"
+          }
+          
+          # Main recovery logic
+          case "${1:-auto}" in
+              database)
+                  recover_database
+                  ;;
+              redis)
+                  recover_redis
+                  ;;
+              backend)
+                  recover_backend
+                  ;;
+              emergency)
+                  emergency_rollback
+                  ;;
+              auto)
+                  log_message "Starting automatic recovery assessment..."
+                  
+                  # Run health check first
+                  /opt/crypto-forecasting/disaster-recovery/scripts/health-check.sh
+                  
+                  if [ $? -ne 0 ]; then
+                      log_message "Health check failed - starting recovery procedures"
+                      
+                      # Try individual service recovery first
+                      recover_database
+                      recover_redis
+                      recover_backend
+                      
+                      # Final health check
+                      sleep 60
+                      /opt/crypto-forecasting/disaster-recovery/scripts/health-check.sh
+                      
+                      if [ $? -ne 0 ]; then
+                          log_message "Individual recovery failed - considering emergency rollback"
+                          read -p "Perform emergency rollback? (y/N): " -n 1 -r
+                          echo
+                          if [[ $REPLY =~ ^[Yy]$ ]]; then
+                              emergency_rollback
+                          fi
+                      fi
+                  else
+                      log_message "All services are healthy - no recovery needed"
+                  fi
+                  ;;
+              *)
+                  echo "Usage: $0 [database|redis|backend|emergency|auto]"
+                  exit 1
+                  ;;
+          esac
+          
+        dest: /opt/crypto-forecasting/disaster-recovery/scripts/auto-recovery.sh
+        mode: '0755'
+
+    - name: Create monitoring and alerting script
+      copy:
+        content: |
+          #!/bin/bash
+          
+          # Monitoring and Alerting Script for Disaster Recovery
+          
+          NAMESPACE="{{ namespace }}"
+          LOG_FILE="/opt/crypto-forecasting/disaster-recovery/logs/monitoring.log"
+          ALERT_LOG="/opt/crypto-forecasting/disaster-recovery/logs/alerts.log"
+          CHECK_INTERVAL={{ recovery_config.monitoring_interval }}
+          
+          log_message() {
+              echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+          }
+          
+          alert_message() {
+              echo "$(date '+%Y-%m-%d %H:%M:%S') - ALERT: $1" | tee -a "$ALERT_LOG"
+              log_message "ALERT: $1"
+          }
+          
+          check_system_resources() {
+              log_message "Checking system resources..."
+              
+              # Check disk space
+              DISK_USAGE=$(df / | awk 'NR==2 {print $5}' | sed 's/%//')
+              if [ $DISK_USAGE -gt 85 ]; then
+                  alert_message "High disk usage: ${DISK_USAGE}%"
+              fi
+              
+              # Check memory usage
+              MEMORY_USAGE=$(free | awk 'NR==2{printf "%.2f", $3*100/$2}')
+              if (( $(echo "$MEMORY_USAGE > 85" | bc -l) )); then
+                  alert_message "High memory usage: ${MEMORY_USAGE}%"
+              fi
+              
+              # Check load average
+              LOAD_AVG=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | sed 's/,//')
+              CPU_COUNT=$(nproc)
+              if (( $(echo "$LOAD_AVG > $CPU_COUNT" | bc -l) )); then
+                  alert_message "High system load: $LOAD_AVG (CPUs: $CPU_COUNT)"
+              fi
+          }
+          
+          check_kubernetes_cluster() {
+              log_message "Checking Kubernetes cluster health..."
+              
+              # Check node status
+              UNHEALTHY_NODES=$(kubectl get nodes --no-headers | grep -v Ready | wc -l)
+              if [ $UNHEALTHY_NODES -gt 0 ]; then
+                  alert_message "$UNHEALTHY_NODES unhealthy nodes detected"
+              fi
+              
+              # Check namespace status
+              if ! kubectl get namespace $NAMESPACE &>/dev/null; then
+                  alert_message "Namespace $NAMESPACE not found"
+                  return 1
+              fi
+              
+              # Check for failed pods
+              FAILED_PODS=$(kubectl get pods -n $NAMESPACE --no-headers | grep -v Running | wc -l)
+              if [ $FAILED_PODS -gt 0 ]; then
+                  alert_message "$FAILED_PODS pods not in Running state"
+                  kubectl get pods -n $NAMESPACE --no-headers | grep -v Running | while read line; do
+                      alert_message "Failed pod: $line"
+                  done
+              fi
+              
+              # Check for pending PVCs
+              PENDING_PVCS=$(kubectl get pvc -n $NAMESPACE --no-headers | grep Pending | wc -l)
+              if [ $PENDING_PVCS -gt 0 ]; then
+                  alert_message "$PENDING_PVCS PVCs in Pending state"
+              fi
+          }
+          
+          check_service_connectivity() {
+              log_message "Checking service connectivity..."
+              
+              # Check PostgreSQL
+              if ! kubectl exec -n $NAMESPACE deployment/postgres -- pg_isready -U crypto &>/dev/null; then
+                  alert_message "PostgreSQL connectivity failed"
+              fi
+              
+              # Check Redis
+              if ! kubectl exec -n $NAMESPACE deployment/redis -- redis-cli ping | grep -q "PONG" &>/dev/null; then
+                  alert_message "Redis connectivity failed"
+              fi
+              
+              # Check backend API
+              BACKEND_PORT=$(kubectl get svc -n $NAMESPACE backend -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null)
+              if [ ! -z "$BACKEND_PORT" ]; then
+                  if ! curl -s "http://localhost:$BACKEND_PORT/health" &>/dev/null; then
+                      alert_message "Backend API health check failed"
+                  fi
+              fi
+          }
+          
+          check_backup_status() {
+              log_message "Checking backup status..."
+              
+              BACKUP_DIR="{{ backup_config.backup_location if backup_config is defined else '/opt/crypto-forecasting/backups' }}"
+              
+              # Check if backup directory exists
+              if [ ! -d "$BACKUP_DIR" ]; then
+                  alert_message "Backup directory not found: $BACKUP_DIR"
+                  return 1
+              fi
+              
+              # Check for recent database backup
+              LATEST_DB_BACKUP=$(find "$BACKUP_DIR/database" -name "postgres_backup_*.sql.gz" -mtime -1 | wc -l)
+              if [ $LATEST_DB_BACKUP -eq 0 ]; then
+                  alert_message "No recent database backup found (within 24 hours)"
+              fi
+              
+              # Check backup file sizes
+              find "$BACKUP_DIR" -name "*.gz" -size -1k -exec basename {} \; | while read small_backup; do
+                  alert_message "Suspiciously small backup file: $small_backup"
+              done
+          }
+          
+          run_continuous_monitoring() {
+              log_message "Starting continuous monitoring (interval: ${CHECK_INTERVAL}s)"
+              
+              while true; do
+                  log_message "=== Monitoring Cycle Started ==="
+                  
+                  check_system_resources
+                  check_kubernetes_cluster
+                  check_service_connectivity
+                  check_backup_status
+                  
+                  log_message "=== Monitoring Cycle Completed ==="
+                  
+                  sleep $CHECK_INTERVAL
+              done
+          }
+          
+          # Main execution
+          case "${1:-monitor}" in
+              monitor)
+                  run_continuous_monitoring
+                  ;;
+              system)
+                  check_system_resources
+                  ;;
+              k8s)
+                  check_kubernetes_cluster
+                  ;;
+              connectivity)
+                  check_service_connectivity
+                  ;;
+              backup)
+                  check_backup_status
+                  ;;
+              once)
+                  check_system_resources
+                  check_kubernetes_cluster
+                  check_service_connectivity
+                  check_backup_status
+                  ;;
+              *)
+                  echo "Usage: $0 [monitor|system|k8s|connectivity|backup|once]"
+                  exit 1
+                  ;;
+          esac
+          
+        dest: /opt/crypto-forecasting/disaster-recovery/scripts/monitoring.sh
+        mode: '0755'
+
+    - name: Create disaster recovery runbook
+      copy:
+        content: |
+          # Disaster Recovery Runbook
+          # Crypto Forecasting Platform - Dev Environment
+          
+          ## Overview
+          This runbook provides step-by-step procedures for disaster recovery scenarios in the dev environment.
+          
+          ## Emergency Contacts
+          - Development Team Lead: [Contact Information]
+          - System Administrator: [Contact Information]
+          - On-Call Engineer: [Contact Information]
+          
+          ## Recovery Time Objectives (RTO)
+          - Database Recovery: 15 minutes
+          - Application Recovery: 10 minutes
+          - Full Platform Recovery: 30 minutes
+          
+          ## Common Disaster Scenarios
+          
+          ### Scenario 1: Database Corruption/Failure
+          
+          **Symptoms:**
+          - PostgreSQL connection errors
+          - Data inconsistency
+          - Database pod in CrashLoopBackOff
+          
+          **Recovery Steps:**
+          1. Assess the situation:
+             ```bash
+             kubectl get pods -n crypto-forecasting -l app=postgres
+             kubectl logs -n crypto-forecasting deployment/postgres
+             ```
+          
+          2. Attempt automatic recovery:
+             ```bash
+             /opt/crypto-forecasting/disaster-recovery/scripts/auto-recovery.sh database
+             ```
+          
+          3. If automatic recovery fails, restore from backup:
+             ```bash
+             /opt/crypto-forecasting/disaster-recovery.sh restore-database latest
+             ```
+          
+          4. Verify recovery:
+             ```bash
+             /opt/crypto-forecasting/disaster-recovery/scripts/health-check.sh
+             ```
+          
+          ### Scenario 2: Complete Platform Failure
+          
+          **Symptoms:**
+          - Multiple services down
+          - Namespace deleted or corrupted
+          - Infrastructure issues
+          
+          **Recovery Steps:**
+          1. Perform emergency rollback:
+             ```bash
+             /opt/crypto-forecasting/disaster-recovery/scripts/auto-recovery.sh emergency
+             ```
+          
+          2. Restore from backups:
+             ```bash
+             /opt/crypto-forecasting/disaster-recovery.sh full-restore latest
+             ```
+          
+          3. Verify all services:
+             ```bash
+             /opt/crypto-forecasting/disaster-recovery/scripts/health-check.sh
+             ```
+          
+          ### Scenario 3: Data Loss
+          
+          **Symptoms:**
+          - Missing training data
+          - Corrupted ML models
+          - Configuration loss
+          
+          **Recovery Steps:**
+          1. Identify what data was lost
+          2. Restore specific components:
+             ```bash
+             # For ML models
+             /opt/crypto-forecasting/disaster-recovery.sh restore-models latest
+             
+             # For configuration
+             /opt/crypto-forecasting/disaster-recovery.sh restore-config latest
+             ```
+          
+          ### Scenario 4: Performance Degradation
+          
+          **Symptoms:**
+          - Slow API responses
+          - High resource usage
+          - Service timeouts
+          
+          **Recovery Steps:**
+          1. Check system resources:
+             ```bash
+             /opt/crypto-forecasting/disaster-recovery/scripts/monitoring.sh system
+             ```
+          
+          2. Restart affected services:
+             ```bash
+             /opt/crypto-forecasting/disaster-recovery/scripts/auto-recovery.sh backend
+             ```
+          
+          3. Scale resources if needed:
+             ```bash
+             kubectl scale deployment -n crypto-forecasting backend --replicas=2
+             ```
+          
+          ## Prevention Measures
+          
+          ### Regular Health Checks
+          Run daily health checks:
+          ```bash
+          /opt/crypto-forecasting/disaster-recovery/scripts/health-check.sh
+          ```
+          
+          ### Continuous Monitoring
+          Start continuous monitoring:
+          ```bash
+          /opt/crypto-forecasting/disaster-recovery/scripts/monitoring.sh monitor &
+          ```
+          
+          ### Backup Verification
+          Test backup restoration monthly:
+          ```bash
+          /opt/crypto-forecasting/disaster-recovery.sh restore-database latest
+          ```
+          
+          ## Post-Recovery Checklist
+          
+          1. [ ] All services are running and healthy
+          2. [ ] Database connectivity verified
+          3. [ ] API endpoints responding
+          4. [ ] ML models loaded correctly
+          5. [ ] Monitoring systems active
+          6. [ ] Backup systems operational
+          7. [ ] Performance metrics normal
+          8. [ ] Security policies applied
+          9. [ ] Documentation updated
+          10. [ ] Team notified of recovery completion
+          
+          ## Escalation Procedures
+          
+          ### Level 1: Automatic Recovery
+          - Use automated scripts
+          - Standard operating procedures
+          - No human intervention required
+          
+          ### Level 2: Manual Intervention
+          - Follow runbook procedures
+          - Involve on-call engineer
+          - Document actions taken
+          
+          ### Level 3: Emergency Response
+          - Contact team lead
+          - Consider external resources
+          - Prepare for extended downtime
+          
+          ## Lessons Learned Template
+          
+          After each incident, complete the following:
+          
+          **Incident Summary:**
+          - Date/Time:
+          - Duration:
+          - Root Cause:
+          - Services Affected:
+          
+          **Timeline of Events:**
+          - Detection:
+          - Response:
+          - Resolution:
+          
+          **Actions Taken:**
+          - Immediate Actions:
+          - Recovery Steps:
+          - Verification:
+          
+          **Improvements:**
+          - Process Changes:
+          - Tool Updates:
+          - Training Needs:
+          
+        dest: /opt/crypto-forecasting/disaster-recovery/runbook.md
+        mode: '0644'
+
+    - name: Create disaster recovery testing script
+      copy:
+        content: |
+          #!/bin/bash
+          
+          # Disaster Recovery Testing Script
+          
+          NAMESPACE="{{ namespace }}"
+          LOG_FILE="/opt/crypto-forecasting/disaster-recovery/logs/testing.log"
+          
+          log_message() {
+              echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+          }
+          
+          test_backup_restore() {
+              log_message "Testing backup and restore procedures..."
+              
+              # Create test backup
+              log_message "Creating test backup..."
+              /opt/crypto-forecasting/backup-database.sh
+              
+              if [ $? -eq 0 ]; then
+                  log_message "Test backup created successfully"
+              else
+                  log_message "Test backup creation failed"
+                  return 1
+              fi
+              
+              # Test restore process (dry run)
+              log_message "Testing restore process (simulation)..."
+              LATEST_BACKUP=$(ls -t /opt/crypto-forecasting/backups/database/postgres_backup_*.sql.gz | head -1)
+              
+              if [ -f "$LATEST_BACKUP" ]; then
+                  log_message "Latest backup found: $LATEST_BACKUP"
+                  log_message "Backup restore test: SIMULATED SUCCESS"
+              else
+                  log_message "No backup file found for testing"
+                  return 1
+              fi
+              
+              return 0
+          }
+          
+          test_service_recovery() {
+              log_message "Testing service recovery procedures..."
+              
+              # Test health check functionality
+              log_message "Testing health check script..."
+              /opt/crypto-forecasting/disaster-recovery/scripts/health-check.sh
+              
+              if [ $? -eq 0 ]; then
+                  log_message "Health check test passed"
+              else
+                  log_message "Health check test failed"
+                  return 1
+              fi
+              
+              # Test monitoring script
+              log_message "Testing monitoring script..."
+              timeout 60 /opt/crypto-forecasting/disaster-recovery/scripts/monitoring.sh once
+              
+              if [ $? -eq 0 ]; then
+                  log_message "Monitoring test passed"
+              else
+                  log_message "Monitoring test failed"
+                  return 1
+              fi
+              
+              return 0
+          }
+          
+          test_failover_scenarios() {
+              log_message "Testing failover scenarios..."
+              
+              # Simulate service failure by scaling down
+              log_message "Simulating backend service failure..."
+              
+              # Save current replica count
+              CURRENT_REPLICAS=$(kubectl get deployment -n $NAMESPACE backend -o jsonpath='{.spec.replicas}')
+              
+              # Scale down
+              kubectl scale deployment -n $NAMESPACE backend --replicas=0
+              sleep 30
+              
+              # Test detection
+              if kubectl get pods -n $NAMESPACE -l app=backend | grep -q "Running"; then
+                  log_message "Failover test failed - service still running"
+                  return 1
+              else
+                  log_message "Service failure detected successfully"
+              fi
+              
+              # Test recovery
+              kubectl scale deployment -n $NAMESPACE backend --replicas=$CURRENT_REPLICAS
+              sleep 60
+              
+              # Verify recovery
+              if kubectl get pods -n $NAMESPACE -l app=backend | grep -q "Running"; then
+                  log_message "Service recovery test passed"
+              else
+                  log_message "Service recovery test failed"
+                  return 1
+              fi
+              
+              return 0
+          }
+          
+          test_data_integrity() {
+              log_message "Testing data integrity checks..."
+              
+              # Test database connectivity
+              kubectl exec -n $NAMESPACE deployment/postgres -- pg_isready -U crypto
+              if [ $? -eq 0 ]; then
+                  log_message "Database connectivity test passed"
+              else
+                  log_message "Database connectivity test failed"
+                  return 1
+              fi
+              
+              # Test Redis connectivity
+              kubectl exec -n $NAMESPACE deployment/redis -- redis-cli ping | grep -q "PONG"
+              if [ $? -eq 0 ]; then
+                  log_message "Redis connectivity test passed"
+              else
+                  log_message "Redis connectivity test failed"
+                  return 1
+              fi
+              
+              return 0
+          }
+          
+          generate_test_report() {
+              log_message "Generating disaster recovery test report..."
+              
+              cat > /opt/crypto-forecasting/disaster-recovery/test-report-$(date +%Y%m%d_%H%M%S).md << EOF
+          # Disaster Recovery Test Report
+          
+          **Date:** $(date)
+          **Environment:** {{ environment }}
+          **Namespace:** $NAMESPACE
+          
+          ## Test Results Summary
+          
+          | Test Category | Status | Details |
+          |---------------|--------|---------|
+          | Backup/Restore | $backup_restore_status | $backup_restore_details |
+          | Service Recovery | $service_recovery_status | $service_recovery_details |
+          | Failover Scenarios | $failover_status | $failover_details |
+          | Data Integrity | $data_integrity_status | $data_integrity_details |
+          
+          ## Recommendations
+          
+          Based on the test results, the following actions are recommended:
+          
+          1. Regular testing should be performed weekly
+          2. Backup verification should be automated
+          3. Monitoring alerts should be configured
+          4. Recovery procedures should be documented and practiced
+          
+          ## Next Steps
+          
+          - Schedule next test for: $(date -d "+1 week")
+          - Review and update procedures as needed
+          - Train team members on recovery procedures
+          
+          EOF
+              
+              log_message "Test report generated successfully"
+          }
+          
+          # Main test execution
+          log_message "Starting disaster recovery testing..."
+          
+          backup_restore_status="FAILED"
+          service_recovery_status="FAILED"
+          failover_status="FAILED"
+          data_integrity_status="FAILED"
+          
+          backup_restore_details="Not tested"
+          service_recovery_details="Not tested"
+          failover_details="Not tested"
+          data_integrity_details="Not tested"
+          
+          # Run tests
+          if test_backup_restore; then
+              backup_restore_status="PASSED"
+              backup_restore_details="Backup creation and restore simulation successful"
+          else
+              backup_restore_details="Backup or restore process failed"
+          fi
+          
+          if test_service_recovery; then
+              service_recovery_status="PASSED"
+              service_recovery_details="Health check and monitoring scripts working correctly"
+          else
+              service_recovery_details="Service recovery scripts failed"
+          fi
+          
+          if test_failover_scenarios; then
+              failover_status="PASSED"
+              failover_details="Service failure detection and recovery successful"
+          else
+              failover_details="Failover testing failed"
+          fi
+          
+          if test_data_integrity; then
+              data_integrity_status="PASSED"
+              data_integrity_details="Database and Redis connectivity verified"
+          else
+              data_integrity_details="Data integrity checks failed"
+          fi
+          
+          # Generate final report
+          generate_test_report
+          
+          log_message "Disaster recovery testing completed"
+          
+          # Summary
+          if [[ "$backup_restore_status" == "PASSED" && "$service_recovery_status" == "PASSED" && 
+                "$failover_status" == "PASSED" && "$data_integrity_status" == "PASSED" ]]; then
+              log_message "ALL TESTS PASSED - Disaster recovery system is operational"
+              exit 0
+          else
+              log_message "SOME TESTS FAILED - Review test results and address issues"
+              exit 1
+          fi
+          
+        dest: /opt/crypto-forecasting/disaster-recovery/scripts/test-dr.sh
+        mode: '0755'
+
+    - name: Create disaster recovery summary
+      copy:
+        content: |
+          # Disaster Recovery Implementation Summary
+          
+          Date: {{ ansible_date_time.date }}
+          Time: {{ ansible_date_time.time }}
+          Environment: {{ environment }}
+          
+          ## Disaster Recovery Components Implemented
+          
+          ### Core Recovery Scripts
+          
+          #### Health Check System
+          - Location: /opt/crypto-forecasting/disaster-recovery/scripts/health-check.sh
+          - Purpose: Comprehensive health assessment of all services
+          - Monitors: Pod status, database connectivity, Redis connectivity, API endpoints
+          - Frequency: On-demand or scheduled
+          
+          #### Automatic Recovery System
+          - Location: /opt/crypto-forecasting/disaster-recovery/scripts/auto-recovery.sh
+          - Purpose: Automated recovery procedures for common failures
+          - Capabilities:
+            - Individual service restart (database, redis, backend)
+            - Emergency rollback with full namespace recreation
+            - Integration with backup restoration
+          - Recovery Modes: database, redis, backend, emergency, auto
+          
+          #### Monitoring and Alerting
+          - Location: /opt/crypto-forecasting/disaster-recovery/scripts/monitoring.sh
+          - Purpose: Continuous monitoring with automated alerting
+          - Monitors:
+            - System resources (disk, memory, CPU load)
+            - Kubernetes cluster health
+            - Service connectivity
+            - Backup status and integrity
+          - Check Interval: {{ recovery_config.monitoring_interval }} seconds
+          
+          #### Testing Framework
+          - Location: /opt/crypto-forecasting/disaster-recovery/scripts/test-dr.sh
+          - Purpose: Validate disaster recovery procedures
+          - Tests:
+            - Backup and restore functionality
+            - Service recovery procedures
+            - Failover scenarios
+            - Data integrity checks
+          - Output: Detailed test reports with recommendations
+          
+          ### Documentation and Procedures
+          
+          #### Recovery Runbook
+          - Location: /opt/crypto-forecasting/disaster-recovery/runbook.md
+          - Contents:
+            - Step-by-step recovery procedures
+            - Common disaster scenarios and solutions
+            - Escalation procedures
+            - Post-recovery checklists
+            - Lessons learned template
+          
+          ### Recovery Objectives
+          
+          #### Recovery Time Objectives (RTO)
+          - Database Recovery: < {{ recovery_config.max_downtime_minutes // 2 }} minutes
+          - Application Recovery: < {{ recovery_config.max_downtime_minutes // 3 }} minutes
+          - Full Platform Recovery: < {{ recovery_config.max_downtime_minutes }} minutes
+          
+          #### Recovery Point Objectives (RPO)
+          - Database: < 24 hours (daily backups)
+          - ML Models: < 24 hours (daily backups)
+          - Configuration: < 7 days (weekly backups)
+          
+          ### Priority Services
+          Recovery priority order:
+          {% for service in recovery_config.priority_services %}
+          - {{ service }}
+          {% endfor %}
+          
+          ## Usage Instructions
+          
+          ### Emergency Response Workflow
+          
+          1. **Assessment Phase**
+             ```bash
+             # Run comprehensive health check
+             /opt/crypto-forecasting/disaster-recovery/scripts/health-check.sh
+             ```
+          
+          2. **Automatic Recovery**
+             ```bash
+             # Attempt automatic recovery
+             /opt/crypto-forecasting/disaster-recovery/scripts/auto-recovery.sh auto
+             ```
+          
+          3. **Manual Recovery (if auto fails)**
+             ```bash
+             # Specific service recovery
+             /opt/crypto-forecasting/disaster-recovery/scripts/auto-recovery.sh [service]
+             
+             # Emergency rollback
+             /opt/crypto-forecasting/disaster-recovery/scripts/auto-recovery.sh emergency
+             ```
+          
+          4. **Backup Restoration**
+             ```bash
+             # Database restore
+             /opt/crypto-forecasting/disaster-recovery.sh restore-database latest
+             
+             # Full restore
+             /opt/crypto-forecasting/disaster-recovery.sh full-restore latest
+             ```
+          
+          ### Monitoring Setup
+          
+          ```bash
+          # Start continuous monitoring
+          /opt/crypto-forecasting/disaster-recovery/scripts/monitoring.sh monitor &
+          
+          # One-time check
+          /opt/crypto-forecasting/disaster-recovery/scripts/monitoring.sh once
+          ```
+          
+          ### Regular Testing
+          
+          ```bash
+          # Run disaster recovery tests
+          /opt/crypto-forecasting/disaster-recovery/scripts/test-dr.sh
+          ```
+          
+          ## Integration Points
+          
+          ### With Backup System
+          - Automatic restoration capabilities
+          - Backup integrity verification
+          - Retention policy enforcement
+          
+          ### With Monitoring System
+          - Prometheus metrics integration
+          - Grafana dashboard alerts
+          - Log aggregation and analysis
+          
+          ### With Kubernetes
+          - Native kubectl commands
+          - Namespace management
+          - Resource scaling and management
+          
+          ## Best Practices
+          
+          ### For Development Environment
+          - Test recovery procedures weekly
+          - Maintain updated runbooks
+          - Practice failure scenarios
+          - Document all procedures
+          
+          ### For Production Readiness
+          - Implement off-site backup storage
+          - Set up automated alerting
+          - Create disaster recovery team
+          - Conduct regular DR drills
+          - Implement geo-redundancy
+          - Set up monitoring dashboards
+          
+          ## Security Considerations
+          
+          - Backup files access control
+          - Recovery script permissions
+          - Audit logging for all recovery actions
+          - Secure communication channels
+          - Emergency contact procedures
+          
+          ## Compliance and Reporting
+          
+          - Recovery test documentation
+          - Incident response logs
+          - Recovery time tracking
+          - Compliance report generation
+          - Regular DR assessment reports
+          
+          ## Next Steps
+          
+          1. Set up automated monitoring
+          2. Schedule regular testing
+          3. Train team on procedures
+          4. Integrate with CI/CD pipeline
+          5. Implement automated alerting
+          6. Create monitoring dashboards
+          
+        dest: /opt/crypto-forecasting/disaster-recovery.log
+        mode: '0644'

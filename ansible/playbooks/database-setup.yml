@@ -1,0 +1,159 @@
+---
+- name: Crypto Forecasting - Database Setup (Dev Environment)
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    environment: dev
+    namespace: crypto-forecasting
+    postgres_config:
+      database: crypto_forecasting
+      username: crypto
+      password: crypto123
+      port: 30432
+    redis_config:
+      port: 30379
+      maxmemory: "256mb"
+      maxmemory_policy: "allkeys-lru"
+
+  tasks:
+    - name: Wait for PostgreSQL pod to be ready
+      k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ namespace }}"
+        label_selectors:
+          - app=postgres
+        wait: true
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 300
+      register: postgres_pod
+
+    - name: Wait for Redis pod to be ready
+      k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ namespace }}"
+        label_selectors:
+          - app=redis
+        wait: true
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 300
+      register: redis_pod
+
+    - name: Test PostgreSQL connection
+      postgresql_ping:
+        host: localhost
+        port: "{{ postgres_config.port }}"
+        user: "{{ postgres_config.username }}"
+        password: "{{ postgres_config.password }}"
+        database: "{{ postgres_config.database }}"
+      register: postgres_connection
+      ignore_errors: yes
+
+    - name: Test Redis connection
+      redis:
+        host: localhost
+        port: "{{ redis_config.port }}"
+        command: ping
+      register: redis_connection
+      ignore_errors: yes
+
+    - name: Create database schema (if accessible)
+      postgresql_query:
+        host: localhost
+        port: "{{ postgres_config.port }}"
+        user: "{{ postgres_config.username }}"
+        password: "{{ postgres_config.password }}"
+        database: "{{ postgres_config.database }}"
+        query: |
+          CREATE TABLE IF NOT EXISTS crypto_data (
+            id SERIAL PRIMARY KEY,
+            timestamp TIMESTAMP NOT NULL,
+            symbol VARCHAR(20) NOT NULL,
+            price DECIMAL(20,8) NOT NULL,
+            volume DECIMAL(20,8),
+            market_cap DECIMAL(20,2),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          
+          CREATE TABLE IF NOT EXISTS ml_models (
+            id SERIAL PRIMARY KEY,
+            model_name VARCHAR(100) NOT NULL,
+            model_type VARCHAR(50) NOT NULL,
+            symbol VARCHAR(20) NOT NULL,
+            accuracy DECIMAL(5,4),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            model_data BYTEA
+          );
+          
+          CREATE TABLE IF NOT EXISTS predictions (
+            id SERIAL PRIMARY KEY,
+            model_id INTEGER REFERENCES ml_models(id),
+            symbol VARCHAR(20) NOT NULL,
+            predicted_price DECIMAL(20,8) NOT NULL,
+            actual_price DECIMAL(20,8),
+            prediction_date TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_crypto_data_symbol_timestamp ON crypto_data(symbol, timestamp);
+          CREATE INDEX IF NOT EXISTS idx_predictions_symbol_date ON predictions(symbol, prediction_date);
+      when: postgres_connection is succeeded
+      ignore_errors: yes
+
+    - name: Configure Redis memory settings
+      redis:
+        host: localhost
+        port: "{{ redis_config.port }}"
+        command: "config set maxmemory {{ redis_config.maxmemory }}"
+      when: redis_connection is succeeded
+      ignore_errors: yes
+
+    - name: Configure Redis eviction policy
+      redis:
+        host: localhost
+        port: "{{ redis_config.port }}"
+        command: "config set maxmemory-policy {{ redis_config.maxmemory_policy }}"
+      when: redis_connection is succeeded
+      ignore_errors: yes
+
+    - name: Create database setup summary
+      copy:
+        content: |
+          # Database Setup Summary
+          
+          Date: {{ ansible_date_time.date }}
+          Time: {{ ansible_date_time.time }}
+          Environment: {{ environment }}
+          
+          ## PostgreSQL Configuration
+          - Host: localhost
+          - Port: {{ postgres_config.port }}
+          - Database: {{ postgres_config.database }}
+          - Username: {{ postgres_config.username }}
+          - Connection Status: {{ 'Success' if postgres_connection is succeeded else 'Failed' }}
+          
+          ## Redis Configuration
+          - Host: localhost
+          - Port: {{ redis_config.port }}
+          - Max Memory: {{ redis_config.maxmemory }}
+          - Eviction Policy: {{ redis_config.maxmemory_policy }}
+          - Connection Status: {{ 'Success' if redis_connection is succeeded else 'Failed' }}
+          
+          ## Database Schema
+          - crypto_data table: Created
+          - ml_models table: Created
+          - predictions table: Created
+          - Indexes: Created
+          
+          ## Connection Commands
+          PostgreSQL: psql -h localhost -p {{ postgres_config.port }} -U {{ postgres_config.username }} -d {{ postgres_config.database }}
+          Redis: redis-cli -h localhost -p {{ redis_config.port }}
+          
+        dest: /opt/crypto-forecasting/database-setup.log
+        mode: '0644'

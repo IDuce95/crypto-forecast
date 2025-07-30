@@ -1,0 +1,72 @@
+---
+# Main deployment playbook for crypto-forecasting application
+# This playbook deploys the entire application stack
+
+- name: Deploy Crypto Forecasting Application
+  hosts: web_servers
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    environment: "{{ env | default('development') }}"
+    git_branch: "{{ branch | default('main') }}"
+    
+  pre_tasks:
+    - name: Display deployment information
+      debug:
+        msg: |
+          Deploying crypto-forecasting application
+          Environment: {{ environment }}
+          Branch: {{ git_branch }}
+          Target hosts: {{ ansible_play_hosts }}
+    
+    - name: Verify connectivity to target hosts
+      ping:
+  
+  roles:
+    - common
+    - crypto-app
+    
+  post_tasks:
+    - name: Verify application deployment
+      uri:
+        url: "http://{{ ansible_default_ipv4.address | default('localhost') }}:{{ app_port }}/health"
+        method: GET
+        status_code: 200
+      register: deployment_check
+      ignore_errors: yes
+      
+    - name: Display deployment result
+      debug:
+        msg: |
+          Deployment {{ 'successful' if deployment_check.status == 200 else 'failed' }}
+          {% if deployment_check.status == 200 %}
+          Application is running at: http://{{ ansible_default_ipv4.address | default('localhost') }}:{{ app_port }}
+          {% else %}
+          Application health check failed. Please check logs.
+          {% endif %}
+
+- name: Setup Monitoring (Optional)
+  hosts: web_servers
+  become: yes
+  gather_facts: no
+  
+  vars:
+    enable_monitoring: "{{ monitoring | default(false) }}"
+    
+  roles:
+    - role: monitoring
+      when: enable_monitoring | bool
+      
+  tasks:
+    - name: Display monitoring information
+      debug:
+        msg: |
+          {% if enable_monitoring | bool %}
+          Monitoring services deployed:
+          - Prometheus: http://{{ ansible_default_ipv4.address | default('localhost') }}:9090
+          - Grafana: http://{{ ansible_default_ipv4.address | default('localhost') }}:3001
+          {% else %}
+          Monitoring services not enabled. Use -e monitoring=true to enable.
+          {% endif %}
+      when: enable_monitoring | bool

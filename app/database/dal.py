@@ -356,9 +356,3 @@ def migrate_csv_data_to_database() -> None:
             print(f"✗ {symbol}: {details.get('error', 'Unknown error')}")
 
 if __name__ == "__main__":
-    """Test DAL operations."""
-    from app.database.connection import init_database
-
-    init_database(create_tables=True)
-
-    migrate_csv_data_to_database()

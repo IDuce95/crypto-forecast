@@ -1,0 +1,134 @@
+# Development environment values
+# Use this with: helm-manage.sh deploy -f values-dev.yaml
+
+# Global settings
+global:
+  environment: development
+
+# Application settings
+app:
+  replicaCount: 1
+
+  image:
+    tag: "latest"
+    pullPolicy: Always
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
+  autoscaling:
+    enabled: false
+
+  env:
+    LOG_LEVEL: DEBUG
+
+# Frontend settings
+frontend:
+  enabled: true
+  replicaCount: 1
+
+  resources:
+    limits:
+      cpu: 250m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# Database settings
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: postgres123
+    username: crypto
+    password: crypto123
+    database: crypto_forecasting
+  primary:
+    persistence:
+      enabled: false  # Use emptyDir for dev
+    resources:
+      limits:
+        cpu: 250m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+# Redis settings
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: false  # Use emptyDir for dev
+    resources:
+      limits:
+        cpu: 100m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 128Mi
+
+# Persistent storage - disabled for dev
+persistence:
+  data:
+    enabled: false
+  models:
+    enabled: false
+  logs:
+    enabled: false
+
+# Ingress - simple setup for dev
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  hosts:
+    - host: crypto-forecasting.dev
+      paths:
+        - path: /api
+          pathType: Prefix
+          service: backend
+        - path: /
+          pathType: Prefix
+          service: frontend
+  tls: []  # No TLS for dev
+
+# Monitoring - lightweight for dev
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    server:
+      retention: "7d"
+      resources:
+        limits:
+          cpu: 250m
+          memory: 512Mi
+        requests:
+          cpu: 100m
+          memory: 256Mi
+  grafana:
+    enabled: true
+    adminPassword: admin
+    resources:
+      limits:
+        cpu: 100m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 128Mi
+
+# Development specific
+development:
+  enabled: true
+  debug: true
+  mockData: true

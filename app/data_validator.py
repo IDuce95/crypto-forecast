@@ -372,16 +372,3 @@ def validate_all_datasets(data_path: Path = None) -> Dict[str, ValidationResult]
     return results
 
 if __name__ == "__main__":
-    """Example usage of the data validator."""
-
-    results = validate_all_datasets()
-
-    for dataset_name, result in results.items():
-        print(f"\n{'=' * 60}")
-        print(f"Dataset: {dataset_name}")
-        print(result)
-
-        if result.data_info:
-            print("Data Info:")
-            for key, value in result.data_info.items():
-                print(f"  {key}: {value}")

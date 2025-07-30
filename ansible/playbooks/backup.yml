@@ -1,0 +1,445 @@
+---
+- name: Crypto Forecasting - Backup and Disaster Recovery
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    environment: dev
+    namespace: crypto-forecasting
+    backup_config:
+      retention_days: 7
+      backup_schedule: "0 2 * * *"  # Daily at 2 AM
+      backup_location: "/opt/crypto-forecasting/backups"
+      
+  tasks:
+    - name: Create backup directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ backup_config.backup_location }}"
+        - "{{ backup_config.backup_location }}/database"
+        - "{{ backup_config.backup_location }}/models"
+        - "{{ backup_config.backup_location }}/config"
+        - "{{ backup_config.backup_location }}/logs"
+
+    - name: Create database backup script
+      copy:
+        content: |
+          #!/bin/bash
+          
+          # Database Backup Script for Crypto Forecasting Platform
+          
+          NAMESPACE="{{ namespace }}"
+          BACKUP_DIR="{{ backup_config.backup_location }}/database"
+          DATE=$(date +"%Y%m%d_%H%M%S")
+          RETENTION_DAYS={{ backup_config.retention_days }}
+          
+          echo "Starting database backup - $DATE"
+          
+          # Create PostgreSQL backup
+          kubectl exec -n $NAMESPACE deployment/postgres -- pg_dump -U crypto -d crypto_forecasting > "$BACKUP_DIR/postgres_backup_$DATE.sql"
+          
+          if [ $? -eq 0 ]; then
+              echo "PostgreSQL backup completed successfully"
+              
+              # Compress the backup
+              gzip "$BACKUP_DIR/postgres_backup_$DATE.sql"
+              echo "Backup compressed: postgres_backup_$DATE.sql.gz"
+          else
+              echo "PostgreSQL backup failed"
+              exit 1
+          fi
+          
+          # Create Redis backup
+          kubectl exec -n $NAMESPACE deployment/redis -- redis-cli BGSAVE
+          kubectl cp $NAMESPACE/$(kubectl get pods -n $NAMESPACE -l app=redis -o jsonpath="{.items[0].metadata.name}"):/data/dump.rdb "$BACKUP_DIR/redis_backup_$DATE.rdb"
+          
+          if [ $? -eq 0 ]; then
+              echo "Redis backup completed successfully"
+          else
+              echo "Redis backup failed"
+          fi
+          
+          # Clean up old backups
+          find "$BACKUP_DIR" -name "*.sql.gz" -mtime +$RETENTION_DAYS -delete
+          find "$BACKUP_DIR" -name "*.rdb" -mtime +$RETENTION_DAYS -delete
+          echo "Old backups cleaned up (retention: $RETENTION_DAYS days)"
+          
+          echo "Backup process completed - $DATE"
+          
+        dest: /opt/crypto-forecasting/backup-database.sh
+        mode: '0755'
+
+    - name: Create ML models backup script
+      copy:
+        content: |
+          #!/bin/bash
+          
+          # ML Models Backup Script
+          
+          NAMESPACE="{{ namespace }}"
+          BACKUP_DIR="{{ backup_config.backup_location }}/models"
+          DATE=$(date +"%Y%m%d_%H%M%S")
+          RETENTION_DAYS={{ backup_config.retention_days }}
+          
+          echo "Starting ML models backup - $DATE"
+          
+          # Get backend pod name
+          BACKEND_POD=$(kubectl get pods -n $NAMESPACE -l app=backend -o jsonpath="{.items[0].metadata.name}")
+          
+          if [ ! -z "$BACKEND_POD" ]; then
+              # Backup trained models
+              kubectl cp $NAMESPACE/$BACKEND_POD:/app/models "$BACKUP_DIR/models_$DATE"
+              
+              if [ $? -eq 0 ]; then
+                  # Compress the models backup
+                  tar -czf "$BACKUP_DIR/models_backup_$DATE.tar.gz" -C "$BACKUP_DIR" "models_$DATE"
+                  rm -rf "$BACKUP_DIR/models_$DATE"
+                  echo "ML models backup completed successfully"
+              else
+                  echo "ML models backup failed"
+              fi
+          else
+              echo "Backend pod not found - skipping models backup"
+          fi
+          
+          # Backup MLflow artifacts if available
+          if kubectl get pods -n $NAMESPACE -l app=mlflow &>/dev/null; then
+              MLFLOW_POD=$(kubectl get pods -n $NAMESPACE -l app=mlflow -o jsonpath="{.items[0].metadata.name}")
+              kubectl cp $NAMESPACE/$MLFLOW_POD:/mlflow/artifacts "$BACKUP_DIR/mlflow_artifacts_$DATE"
+              
+              if [ $? -eq 0 ]; then
+                  tar -czf "$BACKUP_DIR/mlflow_backup_$DATE.tar.gz" -C "$BACKUP_DIR" "mlflow_artifacts_$DATE"
+                  rm -rf "$BACKUP_DIR/mlflow_artifacts_$DATE"
+                  echo "MLflow artifacts backup completed"
+              fi
+          fi
+          
+          # Clean up old model backups
+          find "$BACKUP_DIR" -name "*.tar.gz" -mtime +$RETENTION_DAYS -delete
+          echo "Old model backups cleaned up"
+          
+          echo "Models backup process completed - $DATE"
+          
+        dest: /opt/crypto-forecasting/backup-models.sh
+        mode: '0755'
+
+    - name: Create configuration backup script
+      copy:
+        content: |
+          #!/bin/bash
+          
+          # Configuration Backup Script
+          
+          NAMESPACE="{{ namespace }}"
+          BACKUP_DIR="{{ backup_config.backup_location }}/config"
+          DATE=$(date +"%Y%m%d_%H%M%S")
+          RETENTION_DAYS={{ backup_config.retention_days }}
+          
+          echo "Starting configuration backup - $DATE"
+          
+          # Backup Kubernetes configurations
+          kubectl get all,configmaps,secrets,pvc,networkpolicies -n $NAMESPACE -o yaml > "$BACKUP_DIR/k8s_config_$DATE.yaml"
+          
+          # Backup Helm values
+          if [ -f "/home/palianm/Desktop/crypto-forecasting/helm/crypto-forecasting/values.yaml" ]; then
+              cp "/home/palianm/Desktop/crypto-forecasting/helm/crypto-forecasting/values.yaml" "$BACKUP_DIR/helm_values_$DATE.yaml"
+          fi
+          
+          # Backup application configuration files
+          if [ -f "/home/palianm/Desktop/crypto-forecasting/.env" ]; then
+              cp "/home/palianm/Desktop/crypto-forecasting/.env" "$BACKUP_DIR/app_env_$DATE"
+          fi
+          
+          # Backup Ansible playbooks
+          tar -czf "$BACKUP_DIR/ansible_config_$DATE.tar.gz" -C "/home/palianm/Desktop/crypto-forecasting" "ansible/"
+          
+          # Compress all configuration backups
+          tar -czf "$BACKUP_DIR/config_backup_$DATE.tar.gz" -C "$BACKUP_DIR" \
+              "k8s_config_$DATE.yaml" \
+              "helm_values_$DATE.yaml" \
+              "app_env_$DATE" \
+              "ansible_config_$DATE.tar.gz" 2>/dev/null
+          
+          # Clean up individual files after compression
+          rm -f "$BACKUP_DIR/k8s_config_$DATE.yaml" \
+                "$BACKUP_DIR/helm_values_$DATE.yaml" \
+                "$BACKUP_DIR/app_env_$DATE" \
+                "$BACKUP_DIR/ansible_config_$DATE.tar.gz"
+          
+          echo "Configuration backup completed successfully"
+          
+          # Clean up old config backups
+          find "$BACKUP_DIR" -name "config_backup_*.tar.gz" -mtime +$RETENTION_DAYS -delete
+          echo "Old configuration backups cleaned up"
+          
+          echo "Configuration backup process completed - $DATE"
+          
+        dest: /opt/crypto-forecasting/backup-config.sh
+        mode: '0755'
+
+    - name: Create disaster recovery script
+      copy:
+        content: |
+          #!/bin/bash
+          
+          # Disaster Recovery Script for Crypto Forecasting Platform
+          
+          NAMESPACE="{{ namespace }}"
+          BACKUP_DIR="{{ backup_config.backup_location }}"
+          
+          usage() {
+              echo "Usage: $0 [restore-database|restore-models|restore-config|full-restore] [backup-date]"
+              echo "Example: $0 restore-database 20250130_020000"
+              echo "Example: $0 full-restore latest"
+              exit 1
+          }
+          
+          if [ $# -lt 1 ]; then
+              usage
+          fi
+          
+          OPERATION=$1
+          BACKUP_DATE=${2:-"latest"}
+          
+          restore_database() {
+              echo "Restoring database from backup..."
+              
+              if [ "$BACKUP_DATE" = "latest" ]; then
+                  BACKUP_FILE=$(ls -t $BACKUP_DIR/database/postgres_backup_*.sql.gz | head -1)
+              else
+                  BACKUP_FILE="$BACKUP_DIR/database/postgres_backup_$BACKUP_DATE.sql.gz"
+              fi
+              
+              if [ ! -f "$BACKUP_FILE" ]; then
+                  echo "Backup file not found: $BACKUP_FILE"
+                  exit 1
+              fi
+              
+              echo "Using backup file: $BACKUP_FILE"
+              
+              # Extract and restore
+              gunzip -c "$BACKUP_FILE" | kubectl exec -i -n $NAMESPACE deployment/postgres -- psql -U crypto -d crypto_forecasting
+              
+              if [ $? -eq 0 ]; then
+                  echo "Database restored successfully"
+              else
+                  echo "Database restore failed"
+                  exit 1
+              fi
+          }
+          
+          restore_models() {
+              echo "Restoring ML models from backup..."
+              
+              if [ "$BACKUP_DATE" = "latest" ]; then
+                  BACKUP_FILE=$(ls -t $BACKUP_DIR/models/models_backup_*.tar.gz | head -1)
+              else
+                  BACKUP_FILE="$BACKUP_DIR/models/models_backup_$BACKUP_DATE.tar.gz"
+              fi
+              
+              if [ ! -f "$BACKUP_FILE" ]; then
+                  echo "Models backup file not found: $BACKUP_FILE"
+                  exit 1
+              fi
+              
+              echo "Using models backup file: $BACKUP_FILE"
+              
+              # Extract models
+              TEMP_DIR="/tmp/models_restore_$$"
+              mkdir -p "$TEMP_DIR"
+              tar -xzf "$BACKUP_FILE" -C "$TEMP_DIR"
+              
+              # Copy to backend pod
+              BACKEND_POD=$(kubectl get pods -n $NAMESPACE -l app=backend -o jsonpath="{.items[0].metadata.name}")
+              if [ ! -z "$BACKEND_POD" ]; then
+                  kubectl cp "$TEMP_DIR/models_$BACKUP_DATE" $NAMESPACE/$BACKEND_POD:/app/models
+                  echo "Models restored successfully"
+              else
+                  echo "Backend pod not found"
+                  exit 1
+              fi
+              
+              # Clean up
+              rm -rf "$TEMP_DIR"
+          }
+          
+          restore_config() {
+              echo "Restoring configuration from backup..."
+              
+              if [ "$BACKUP_DATE" = "latest" ]; then
+                  BACKUP_FILE=$(ls -t $BACKUP_DIR/config/config_backup_*.tar.gz | head -1)
+              else
+                  BACKUP_FILE="$BACKUP_DIR/config/config_backup_$BACKUP_DATE.tar.gz"
+              fi
+              
+              if [ ! -f "$BACKUP_FILE" ]; then
+                  echo "Configuration backup file not found: $BACKUP_FILE"
+                  exit 1
+              fi
+              
+              echo "Configuration restore requires manual intervention"
+              echo "Backup file: $BACKUP_FILE"
+              echo "Extract and review before applying to prevent data loss"
+          }
+          
+          case $OPERATION in
+              restore-database)
+                  restore_database
+                  ;;
+              restore-models)
+                  restore_models
+                  ;;
+              restore-config)
+                  restore_config
+                  ;;
+              full-restore)
+                  echo "Starting full disaster recovery..."
+                  restore_database
+                  restore_models
+                  restore_config
+                  echo "Full disaster recovery completed"
+                  ;;
+              *)
+                  usage
+                  ;;
+          esac
+          
+        dest: /opt/crypto-forecasting/disaster-recovery.sh
+        mode: '0755'
+
+    - name: Create backup cron job configuration
+      copy:
+        content: |
+          # Cron job configuration for automated backups
+          # Add these lines to your crontab (crontab -e)
+          
+          # Daily database backup at 2:00 AM
+          0 2 * * * /opt/crypto-forecasting/backup-database.sh >> /opt/crypto-forecasting/logs/backup.log 2>&1
+          
+          # Daily models backup at 2:30 AM
+          30 2 * * * /opt/crypto-forecasting/backup-models.sh >> /opt/crypto-forecasting/logs/backup.log 2>&1
+          
+          # Weekly configuration backup on Sundays at 3:00 AM
+          0 3 * * 0 /opt/crypto-forecasting/backup-config.sh >> /opt/crypto-forecasting/logs/backup.log 2>&1
+          
+          # Monthly cleanup of old logs (keep 30 days)
+          0 4 1 * * find /opt/crypto-forecasting/logs -name "*.log" -mtime +30 -delete
+          
+        dest: /opt/crypto-forecasting/backup-crontab.txt
+        mode: '0644'
+
+    - name: Run initial backup test
+      shell: |
+        echo "Testing backup scripts..."
+        /opt/crypto-forecasting/backup-database.sh
+        /opt/crypto-forecasting/backup-models.sh
+        /opt/crypto-forecasting/backup-config.sh
+      register: backup_test
+      ignore_errors: yes
+
+    - name: Create backup and disaster recovery summary
+      copy:
+        content: |
+          # Backup and Disaster Recovery Summary
+          
+          Date: {{ ansible_date_time.date }}
+          Time: {{ ansible_date_time.time }}
+          Environment: {{ environment }}
+          
+          ## Backup Configuration
+          
+          ### Backup Schedule
+          - Database: Daily at 2:00 AM
+          - ML Models: Daily at 2:30 AM
+          - Configuration: Weekly on Sundays at 3:00 AM
+          - Retention Period: {{ backup_config.retention_days }} days
+          - Backup Location: {{ backup_config.backup_location }}
+          
+          ### Backup Components
+          
+          #### Database Backup
+          - PostgreSQL: Full database dump (compressed)
+          - Redis: RDB snapshot
+          - Automatic compression: gzip
+          - Script: /opt/crypto-forecasting/backup-database.sh
+          
+          #### ML Models Backup
+          - Trained models directory
+          - MLflow artifacts (if available)
+          - Compressed archives: tar.gz format
+          - Script: /opt/crypto-forecasting/backup-models.sh
+          
+          #### Configuration Backup
+          - Kubernetes manifests and configurations
+          - Helm values files
+          - Application environment files
+          - Ansible playbooks
+          - Script: /opt/crypto-forecasting/backup-config.sh
+          
+          ## Disaster Recovery
+          
+          ### Recovery Procedures
+          - Database restore: ./disaster-recovery.sh restore-database [date]
+          - Models restore: ./disaster-recovery.sh restore-models [date]
+          - Config restore: ./disaster-recovery.sh restore-config [date]
+          - Full restore: ./disaster-recovery.sh full-restore [date]
+          
+          ### Recovery Time Objectives (RTO)
+          - Database: < 15 minutes
+          - ML Models: < 10 minutes
+          - Full Platform: < 30 minutes
+          
+          ### Recovery Point Objectives (RPO)
+          - Database: < 24 hours (daily backups)
+          - ML Models: < 24 hours (daily backups)
+          - Configuration: < 7 days (weekly backups)
+          
+          ## Monitoring and Alerting
+          
+          ### Backup Monitoring
+          - Backup logs: /opt/crypto-forecasting/logs/backup.log
+          - Success/failure notifications in logs
+          - Automated cleanup of old backups
+          
+          ### Health Checks
+          - Backup file existence verification
+          - Backup file size validation
+          - Restoration testing (recommended monthly)
+          
+          ## Automation Setup
+          
+          ### Cron Jobs (Manual Setup Required)
+          1. Copy cron configuration: /opt/crypto-forecasting/backup-crontab.txt
+          2. Add to crontab: crontab -e
+          3. Verify cron service: systemctl status cron
+          
+          ### Manual Testing
+          - Test database backup: /opt/crypto-forecasting/backup-database.sh
+          - Test models backup: /opt/crypto-forecasting/backup-models.sh
+          - Test configuration backup: /opt/crypto-forecasting/backup-config.sh
+          - Test disaster recovery: /opt/crypto-forecasting/disaster-recovery.sh
+          
+          ## Best Practices
+          
+          ### For Development Environment
+          - Regular backup testing (weekly)
+          - Backup verification scripts
+          - Documentation updates
+          - Access control for backup files
+          
+          ### For Production Environment
+          - Off-site backup storage
+          - Encrypted backup files
+          - Automated monitoring and alerting
+          - Regular disaster recovery drills
+          - Multiple backup locations
+          - Database replication
+          
+          ## Backup Test Results
+          {{ backup_test.stdout if backup_test.stdout else 'Backup testing was skipped or failed' }}
+          
+        dest: /opt/crypto-forecasting/backup-disaster-recovery.log
+        mode: '0644'

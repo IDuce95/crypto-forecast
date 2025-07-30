@@ -1,0 +1,157 @@
+---
+- name: Crypto Forecasting Platform - Infrastructure Setup (Dev Environment)
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  become: yes
+  vars:
+    environment: dev
+    project_name: crypto-forecasting
+    namespace: crypto-forecasting
+    docker_images:
+      - crypto-forecasting-backend:dev
+      - crypto-forecasting-frontend:dev
+      - crypto-forecasting-airflow:dev
+    required_packages:
+      - docker.io
+      - docker-compose
+      - kubectl
+      - helm
+      - python3
+      - python3-pip
+      - git
+      - curl
+      - jq
+    python_packages:
+      - kubernetes
+      - docker
+      - pyyaml
+      - requests
+
+  tasks:
+    - name: Update package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Install required system packages
+      package:
+        name: "{{ required_packages }}"
+        state: present
+
+    - name: Install Python packages
+      pip:
+        name: "{{ python_packages }}"
+        state: present
+
+    - name: Create project directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /opt/crypto-forecasting
+        - /opt/crypto-forecasting/data/raw
+        - /opt/crypto-forecasting/data/processed
+        - /opt/crypto-forecasting/logs
+        - /opt/crypto-forecasting/models
+        - /opt/crypto-forecasting/backups
+
+    - name: Check if Docker service is running
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add current user to docker group
+      user:
+        name: "{{ ansible_user_id }}"
+        groups: docker
+        append: yes
+
+    - name: Check if Kubernetes cluster is accessible
+      k8s_info:
+        api_version: v1
+        kind: Namespace
+      register: k8s_check
+      ignore_errors: yes
+
+    - name: Display Kubernetes status
+      debug:
+        msg: "Kubernetes cluster is {{ 'accessible' if k8s_check is succeeded else 'not accessible' }}"
+
+    - name: Check if Helm is installed
+      command: helm version --short
+      register: helm_version
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Display Helm status
+      debug:
+        msg: "Helm version: {{ helm_version.stdout if helm_version is succeeded else 'Not installed' }}"
+
+    - name: Create Kubernetes namespace
+      k8s:
+        name: "{{ namespace }}"
+        api_version: v1
+        kind: Namespace
+        state: present
+        definition:
+          metadata:
+            labels:
+              environment: "{{ environment }}"
+              app.kubernetes.io/name: "{{ project_name }}"
+      when: k8s_check is succeeded
+
+    - name: Verify Docker images exist
+      docker_image_info:
+        name: "{{ item }}"
+      register: image_check
+      loop: "{{ docker_images }}"
+      ignore_errors: yes
+
+    - name: Display missing Docker images
+      debug:
+        msg: "Missing Docker image: {{ item.item }}"
+      loop: "{{ image_check.results }}"
+      when: not item.images
+
+    - name: Create infrastructure summary
+      copy:
+        content: |
+          # Crypto Forecasting Infrastructure Setup Summary
+          
+          Date: {{ ansible_date_time.date }}
+          Time: {{ ansible_date_time.time }}
+          Environment: {{ environment }}
+          
+          ## System Information
+          - OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          - Architecture: {{ ansible_architecture }}
+          - Python: {{ ansible_python_version }}
+          
+          ## Installed Components
+          - Docker: {{ 'Installed' if docker_check.rc == 0 else 'Not installed' }}
+          - Kubernetes: {{ 'Accessible' if k8s_check is succeeded else 'Not accessible' }}
+          - Helm: {{ helm_version.stdout if helm_version is succeeded else 'Not installed' }}
+          
+          ## Project Structure
+          - Project directory: /opt/crypto-forecasting
+          - Data directory: /opt/crypto-forecasting/data
+          - Logs directory: /opt/crypto-forecasting/logs
+          - Models directory: /opt/crypto-forecasting/models
+          
+          ## Next Steps
+          1. Build Docker images: ./build-images.sh
+          2. Deploy with Helm: cd helm && ./helm-manage.sh deploy
+          3. Access services at http://localhost:30030
+          
+        dest: /opt/crypto-forecasting/infrastructure-setup.log
+        mode: '0644'
+
+  handlers:
+    - name: restart docker
+      systemd:
+        name: docker
+        state: restarted

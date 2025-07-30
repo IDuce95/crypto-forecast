@@ -271,24 +271,3 @@ def setup_datalake() -> DatalakeManager:
     return manager
 
 if __name__ == "__main__":
-    """Setup datalake and show inventory."""
-
-    datalake = setup_datalake()
-
-    inventory = datalake.get_inventory()
-
-    print("\n" + "="*50)
-    print("DATALAKE INVENTORY")
-    print("="*50)
-
-    for stage_name, stage_info in inventory["stages"].items():
-        print(f"\n📁 {stage_name.upper()}:")
-        print(f"  Files: {stage_info['total_files']}")
-        print(f"  Size: {stage_info['total_size_mb']} MB")
-
-        if stage_info["subdirectories"]:
-            print("  Subdirectories:")
-            for subdir, subdir_info in stage_info["subdirectories"].items():
-                print(f"    📂 {subdir}: {subdir_info['files']} files ({subdir_info['size_mb']:.1f} MB)")
-
-    print(f"\n📊 Generated at: {inventory['timestamp']}")

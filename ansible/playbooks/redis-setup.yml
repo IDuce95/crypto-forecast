@@ -1,0 +1,148 @@
+---
+- name: Crypto Forecasting - Redis Setup and Configuration
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    environment: dev
+    namespace: crypto-forecasting
+    redis_config:
+      host: localhost
+      port: 30379
+      maxmemory: "256mb"
+      maxmemory_policy: "allkeys-lru"
+      timeout: 0
+      tcp_keepalive: 300
+      databases: 16
+      save_config: "900 1 300 10 60 10000"
+
+  tasks:
+    - name: Wait for Redis deployment to be ready
+      k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: redis
+        namespace: "{{ namespace }}"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+      register: redis_deployment
+
+    - name: Wait for Redis service to be available
+      wait_for:
+        host: "{{ redis_config.host }}"
+        port: "{{ redis_config.port }}"
+        timeout: 60
+
+    - name: Test Redis connectivity
+      redis:
+        host: "{{ redis_config.host }}"
+        port: "{{ redis_config.port }}"
+        command: ping
+      register: redis_ping
+
+    - name: Configure Redis memory limit
+      redis:
+        host: "{{ redis_config.host }}"
+        port: "{{ redis_config.port }}"
+        command: "config set maxmemory {{ redis_config.maxmemory }}"
+      when: redis_ping is succeeded
+
+    - name: Configure Redis eviction policy
+      redis:
+        host: "{{ redis_config.host }}"
+        port: "{{ redis_config.port }}"
+        command: "config set maxmemory-policy {{ redis_config.maxmemory_policy }}"
+      when: redis_ping is succeeded
+
+    - name: Configure Redis timeout
+      redis:
+        host: "{{ redis_config.host }}"
+        port: "{{ redis_config.port }}"
+        command: "config set timeout {{ redis_config.timeout }}"
+      when: redis_ping is succeeded
+
+    - name: Configure Redis TCP keepalive
+      redis:
+        host: "{{ redis_config.host }}"
+        port: "{{ redis_config.port }}"
+        command: "config set tcp-keepalive {{ redis_config.tcp_keepalive }}"
+      when: redis_ping is succeeded
+
+    - name: Set up Redis key namespaces for application
+      redis:
+        host: "{{ redis_config.host }}"
+        port: "{{ redis_config.port }}"
+        command: "set crypto:forecasting:setup {{ ansible_date_time.epoch }}"
+      when: redis_ping is succeeded
+
+    - name: Create sample cache keys for testing
+      redis:
+        host: "{{ redis_config.host }}"
+        port: "{{ redis_config.port }}"
+        command: "{{ item }}"
+      loop:
+        - "set crypto:forecasting:status active"
+        - "set crypto:forecasting:environment {{ environment }}"
+        - "set crypto:forecasting:version 1.0.0"
+        - "expire crypto:forecasting:status 3600"
+      when: redis_ping is succeeded
+
+    - name: Get Redis configuration info
+      redis:
+        host: "{{ redis_config.host }}"
+        port: "{{ redis_config.port }}"
+        command: "config get *"
+      register: redis_config_info
+      when: redis_ping is succeeded
+
+    - name: Get Redis memory usage info
+      redis:
+        host: "{{ redis_config.host }}"
+        port: "{{ redis_config.port }}"
+        command: "info memory"
+      register: redis_memory_info
+      when: redis_ping is succeeded
+
+    - name: Create Redis setup summary
+      copy:
+        content: |
+          # Redis Setup Summary
+          
+          Date: {{ ansible_date_time.date }}
+          Time: {{ ansible_date_time.time }}
+          Environment: {{ environment }}
+          
+          ## Redis Configuration
+          - Host: {{ redis_config.host }}
+          - Port: {{ redis_config.port }}
+          - Max Memory: {{ redis_config.maxmemory }}
+          - Eviction Policy: {{ redis_config.maxmemory_policy }}
+          - Timeout: {{ redis_config.timeout }}
+          - TCP Keepalive: {{ redis_config.tcp_keepalive }}
+          - Databases: {{ redis_config.databases }}
+          
+          ## Connection Status
+          - Ping Test: {{ 'Success' if redis_ping is succeeded else 'Failed' }}
+          - Configuration Applied: {{ 'Yes' if redis_ping is succeeded else 'No' }}
+          
+          ## Application Namespaces
+          - crypto:forecasting:status = active
+          - crypto:forecasting:environment = {{ environment }}
+          - crypto:forecasting:version = 1.0.0
+          
+          ## Usage Commands
+          Connect: redis-cli -h {{ redis_config.host }} -p {{ redis_config.port }}
+          Monitor: redis-cli -h {{ redis_config.host }} -p {{ redis_config.port }} monitor
+          Info: redis-cli -h {{ redis_config.host }} -p {{ redis_config.port }} info
+          
+          ## Key Patterns for Application
+          - ML Models Cache: crypto:models:*
+          - Predictions Cache: crypto:predictions:*
+          - Market Data Cache: crypto:market:*
+          - User Sessions: crypto:sessions:*
+          
+        dest: /opt/crypto-forecasting/redis-setup.log
+        mode: '0644'

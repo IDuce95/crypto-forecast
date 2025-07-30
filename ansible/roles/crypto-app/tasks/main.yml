@@ -1,0 +1,77 @@
+---
+# Tasks for deploying crypto-forecasting application
+
+- name: Clone or update application repository
+  git:
+    repo: "https://github.com/IDuce95/crypto-forecast.git"
+    dest: "/opt/{{ project_name }}/app"
+    version: "{{ git_branch | default('main') }}"
+    force: yes
+  become: yes
+  become_user: "{{ app_user }}"
+
+- name: Copy application configuration
+  template:
+    src: "{{ item.src }}"
+    dest: "/opt/{{ project_name }}/app/{{ item.dest }}"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0644'
+  become: yes
+  loop:
+    - { src: "docker-compose.yml.j2", dest: "docker-compose.yml" }
+    - { src: "env.j2", dest: ".env" }
+  notify:
+    - restart application
+
+- name: Install Python dependencies
+  pip:
+    requirements: "/opt/{{ project_name }}/app/app/requirements.txt"
+    virtualenv: "/opt/{{ project_name }}/venv"
+  become: yes
+  become_user: "{{ app_user }}"
+
+- name: Create data directories with proper permissions
+  file:
+    path: "/opt/{{ project_name }}/app/{{ item }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+  become: yes
+  loop:
+    - data
+    - data/raw
+    - data/processed
+    - logs
+    - models
+    - predictions
+
+- name: Build Docker images
+  docker_compose:
+    project_src: "/opt/{{ project_name }}/app"
+    build: yes
+  become: yes
+  become_user: "{{ app_user }}"
+
+- name: Start application services
+  docker_compose:
+    project_src: "/opt/{{ project_name }}/app"
+    state: present
+  become: yes
+  become_user: "{{ app_user }}"
+
+- name: Wait for application to be ready
+  uri:
+    url: "http://localhost:{{ app_port }}/health"
+    method: GET
+    status_code: 200
+  register: app_health
+  until: app_health.status == 200
+  retries: 30
+  delay: 10
+  ignore_errors: yes
+
+- name: Display application status
+  debug:
+    msg: "Application is {{ 'running' if app_health.status == 200 else 'not responding' }}"
