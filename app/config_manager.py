@@ -61,10 +61,8 @@ class ConfigManager:
             settings_files=[
                 str(project_root / "app" / "settings.toml"),
             ],
-            environments=True,
-            env_switcher="ENV_FOR_DYNACONF",
             load_dotenv=True,
-            dotenv_path=str(project_root / ".env.dev"),
+            dotenv_path=str(project_root / ".env"),
             merge_enabled=True,
             validators=self._create_validators()
         )
@@ -97,7 +95,7 @@ class ConfigManager:
             logger = logging.getLogger(__name__)
 
             if not os.environ.get('CONFIG_LOGGED'):
-                logger.info(f"Configuration loaded successfully for environment: {self._config.current_env}")
+                logger.info("Configuration loaded successfully")
                 os.environ['CONFIG_LOGGED'] = 'true'
         except Exception as e:
             print(f"Warning: Could not initialize basic logging: {e}")

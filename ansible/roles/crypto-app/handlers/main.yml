@@ -1,0 +1,17 @@
+---
+# Handlers for crypto-app role
+
+- name: restart application
+  docker_compose:
+    project_src: "/opt/{{ project_name }}/app"
+    state: present
+    restarted: yes
+  become: yes
+  become_user: "{{ app_user }}"
+
+- name: stop application
+  docker_compose:
+    project_src: "/opt/{{ project_name }}/app"
+    state: absent
+  become: yes
+  become_user: "{{ app_user }}"

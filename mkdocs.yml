@@ -1,0 +1,147 @@
+site_name: Crypto Forecasting Platform Documentation
+site_description: Enterprise-grade ML platform for cryptocurrency price prediction
+site_author: Crypto Forecasting Team
+site_url: https://crypto-forecasting.example.com
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.tabs.link
+    - content.code.annotation
+    - content.code.copy
+  language: en
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to dark mode
+      primary: indigo
+      accent: purple
+    - scheme: slate
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to light mode
+      primary: indigo
+      accent: lime
+  font:
+    text: Roboto
+    code: Roboto Mono
+  icon:
+    logo: material/chart-line
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - admonition
+  - pymdownx.arithmatex:
+      generic: true
+  - footnotes
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.mark
+  - attr_list
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Configuration: getting-started/configuration.md
+    - First Prediction: getting-started/first-prediction.md
+  - Architecture:
+    - Overview: architecture/overview.md
+    - System Design: architecture/system-design.md
+    - Database Schema: architecture/database-schema.md
+    - ML Pipeline: architecture/ml-pipeline.md
+    - API Design: architecture/api-design.md
+  - API Reference:
+    - REST API: api/rest-api.md
+    - Authentication: api/authentication.md
+    - Endpoints:
+      - Training: api/endpoints/training.md
+      - Prediction: api/endpoints/prediction.md
+      - Models: api/endpoints/models.md
+      - Monitoring: api/endpoints/monitoring.md
+    - Error Codes: api/error-codes.md
+  - Machine Learning:
+    - Models:
+      - Random Forest: ml/models/random-forest.md
+      - XGBoost: ml/models/xgboost.md
+      - Decision Tree: ml/models/decision-tree.md
+      - Deep Learning: ml/models/deep-learning.md
+    - Feature Engineering: ml/feature-engineering.md
+    - Training Pipeline: ml/training-pipeline.md
+    - Model Evaluation: ml/evaluation.md
+    - Hyperparameter Tuning: ml/hyperparameter-tuning.md
+  - Data Pipeline:
+    - Overview: data-pipeline/overview.md
+    - Airflow DAGs: data-pipeline/airflow-dags.md
+    - Data Sources: data-pipeline/data-sources.md
+    - ETL Process: data-pipeline/etl-process.md
+    - Data Validation: data-pipeline/validation.md
+  - Deployment:
+    - Docker: deployment/docker.md
+    - Kubernetes: deployment/kubernetes.md
+    - Helm Charts: deployment/helm.md
+    - Ansible: deployment/ansible.md
+    - CI/CD: deployment/cicd.md
+  - Operations:
+    - Monitoring: operations/monitoring.md
+    - Logging: operations/logging.md
+    - Alerts: operations/alerts.md
+    - Backup & Recovery: operations/backup-recovery.md
+    - Performance Tuning: operations/performance.md
+    - Security: operations/security.md
+  - Development:
+    - Development Setup: development/setup.md
+    - Contributing: development/contributing.md
+    - Code Style: development/code-style.md
+    - Testing: development/testing.md
+    - Debugging: development/debugging.md
+  - Troubleshooting:
+    - Common Issues: troubleshooting/common-issues.md
+    - FAQ: troubleshooting/faq.md
+    - Support: troubleshooting/support.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [app]
+          options:
+            show_source: true
+  - git-revision-date-localized:
+      enable_creation_date: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/crypto-forecasting
+    - icon: fontawesome/brands/docker
+      link: https://hub.docker.com/r/crypto-forecasting
+  version:
+    provider: mike
+
+copyright: |
+  &copy; 2024 Crypto Forecasting Platform

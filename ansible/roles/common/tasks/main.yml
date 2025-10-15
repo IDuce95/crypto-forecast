@@ -1,0 +1,120 @@
+---
+# Common tasks for all servers
+
+- name: Update package cache (Ubuntu/Debian)
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
+  become: yes
+
+- name: Update package cache (CentOS/RHEL)
+  yum:
+    update_cache: yes
+  when: ansible_os_family == "RedHat"
+  become: yes
+
+- name: Install essential packages
+  package:
+    name:
+      - curl
+      - wget
+      - unzip
+      - git
+      - htop
+      - vim
+      - python3
+      - python3-pip
+      - python3-venv
+    state: present
+  become: yes
+
+- name: Create application user
+  user:
+    name: "{{ app_user }}"
+    shell: /bin/bash
+    home: "/home/{{ app_user }}"
+    create_home: yes
+    system: no
+  become: yes
+  when: app_user != "root"
+
+- name: Create application directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+  become: yes
+  loop:
+    - "/opt/{{ project_name }}"
+    - "/opt/{{ project_name }}/data"
+    - "/opt/{{ project_name }}/logs"
+    - "/opt/{{ project_name }}/models"
+    - "/opt/{{ project_name }}/config"
+
+- name: Set up Python virtual environment
+  pip:
+    name: pip
+    virtualenv: "/opt/{{ project_name }}/venv"
+    virtualenv_python: python3
+  become: yes
+  become_user: "{{ app_user }}"
+
+- name: Install Docker dependencies
+  package:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - gnupg
+      - lsb-release
+    state: present
+  become: yes
+  when: ansible_os_family == "Debian"
+
+- name: Add Docker GPG key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+  become: yes
+  when: ansible_os_family == "Debian"
+
+- name: Add Docker repository
+  apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+    update_cache: yes
+  become: yes
+  when: ansible_os_family == "Debian"
+
+- name: Install Docker
+  package:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+    state: present
+  become: yes
+
+- name: Start and enable Docker service
+  systemd:
+    name: docker
+    state: started
+    enabled: yes
+  become: yes
+
+- name: Add user to docker group
+  user:
+    name: "{{ app_user }}"
+    groups: docker
+    append: yes
+  become: yes
+
+- name: Install Docker Compose
+  pip:
+    name: docker-compose
+    version: "{{ docker_compose_version }}"
+    virtualenv: "/opt/{{ project_name }}/venv"
+  become: yes
+  become_user: "{{ app_user }}"

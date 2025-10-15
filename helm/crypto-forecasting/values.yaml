@@ -1,0 +1,247 @@
+# Default values for crypto-forecasting.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Global settings for dev environment
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: "standard"  # Use standard storage class for dev
+
+# Application settings - optimized for dev environment
+app:
+  name: crypto-forecasting
+  environment: dev
+  replicaCount: 1  # Single replica for dev
+  
+  image:
+    registry: ""  # No registry for dev builds
+    repository: crypto-forecasting-backend
+    tag: "dev"
+    pullPolicy: Never  # Use dev images only
+    
+  service:
+    type: NodePort  # Use NodePort for dev access
+    port: 5000
+    targetPort: 5000
+    nodePort: 30050  # Fixed port for dev access
+    
+  resources:
+    limits:
+      cpu: 500m      # Reduced for dev development
+      memory: 1Gi
+    requests:
+      cpu: 100m      # Lower requests for dev
+      memory: 256Mi
+      
+  autoscaling:
+    enabled: false   # Disable autoscaling for dev
+    
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  env:
+    DATABASE_URL: ""  # Will be set from configmap
+    REDIS_URL: ""     # Will be set from configmap
+    LOG_LEVEL: DEBUG  # Debug level for dev development
+    PYTHONPATH: /app
+    ENVIRONMENT: dev
+
+# Frontend settings - optimized for dev
+frontend:
+  enabled: true
+  replicaCount: 1   # Single replica for dev
+
+  image:
+    registry: ""
+    repository: crypto-forecasting-frontend
+    tag: "dev"
+    pullPolicy: Never  # Use dev images only
+    
+  service:
+    type: NodePort   # Use NodePort for dev access
+    port: 3000
+    targetPort: 3000
+    nodePort: 30030  # Fixed port for dev access
+    
+  resources:
+    limits:
+      cpu: 250m      # Reduced for dev
+      memory: 256Mi
+    requests:
+      cpu: 50m       # Lower requests for dev
+      memory: 128Mi
+      
+  env:
+    REACT_APP_API_URL: "http://localhost:30050"  # Point to backend NodePort
+    NODE_ENV: "development"
+
+# Airflow settings - disabled for dev environment
+airflow:
+  enabled: false  # Disable Airflow for dev development
+
+# Database settings - lightweight for dev
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: postgres123
+    username: crypto
+    password: crypto123
+    database: crypto_forecasting
+  primary:
+    persistence:
+      enabled: true
+      size: 2Gi       # Smaller size for dev
+      storageClass: "standard"
+    resources:
+      limits:
+        cpu: 200m     # Reduced for dev
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    service:
+      type: NodePort
+      nodePorts:
+        postgresql: 30432  # Fixed port for dev access
+
+# Redis settings - lightweight for dev
+redis:
+  enabled: true
+  auth:
+    enabled: false    # Disable auth for dev development
+  master:
+    persistence:
+      enabled: true
+      size: 1Gi       # Smaller size for dev
+      storageClass: "standard"
+    resources:
+      limits:
+        cpu: 100m     # Reduced for dev
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 128Mi
+    service:
+      type: NodePort
+      nodePorts:
+        redis: 30379  # Fixed port for dev access
+
+# Persistent storage - smaller sizes for dev development
+persistence:
+  data:
+    enabled: true
+    size: 2Gi         # Reduced for dev
+    accessMode: ReadWriteOnce
+    storageClass: "standard"
+  models:
+    enabled: true
+    size: 1Gi         # Reduced for dev
+    accessMode: ReadWriteOnce
+    storageClass: "standard"
+  logs:
+    enabled: true
+    size: 500Mi       # Reduced for dev
+    accessMode: ReadWriteOnce
+    storageClass: "standard"
+
+# Ingress settings - simplified for dev development
+ingress:
+  enabled: false      # Disable ingress for dev - use NodePort instead
+
+# Monitoring settings - lightweight for dev
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    server:
+      retention: "7d"  # Shorter retention for dev
+      resources:
+        limits:
+          cpu: 200m
+          memory: 512Mi
+        requests:
+          cpu: 100m
+          memory: 256Mi
+      service:
+        type: NodePort
+        nodePort: 30090  # Fixed port for dev access
+  grafana:
+    enabled: true
+    adminPassword: admin
+    resources:
+      limits:
+        cpu: 100m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 128Mi
+    service:
+      type: NodePort
+      nodePort: 30030  # Fixed port for dev access
+
+# Security settings - simplified for dev
+security:
+  podSecurityPolicy:
+    enabled: false
+  networkPolicy:
+    enabled: false    # Disable for easier dev development
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+
+# ConfigMaps and Secrets - dev configuration
+configMaps:
+  app-config:
+    data:
+      settings.toml: |
+        [default]
+        [default.rest_api_settings]
+        backend_hostname = "0.0.0.0"
+        port = 5000
+
+        [default.data_settings]
+        processed_data_path = "/app/data/processed/"
+        raw_data_path = "/app/data/raw/"
+
+        [default.database]
+        type = "postgresql"
+        host = "crypto-forecasting-postgresql"
+        port = 5432
+        name = "crypto_forecasting"
+        user = "crypto"
+        password = "crypto123"
+
+        [default.redis]
+        host = "crypto-forecasting-redis-master"
+        port = 6379
+        db = 0
+
+secrets:
+  app-secrets:
+    data:
+      database-url: "cG9zdGdyZXNxbDovL2NyeXB0bzpjcnlwdG8xMjNAY3J5cHRvLWZvcmVjYXN0aW5nLXBvc3RncmVzcWw6NTQzMi9jcnlwdG9fZm9yZWNhc3Rpbmc="  # postgresql://crypto:crypto123@crypto-forecasting-postgresql:5432/crypto_forecasting
+      redis-url: "cmVkaXM6Ly9jcnlwdG8tZm9yZWNhc3RpbmctcmVkaXMtbWFzdGVyOjYzNzkvMA=="  # redis://crypto-forecasting-redis-master:6379/0
+
+# RBAC - simplified for dev
+rbac:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources: ["pods", "services", "endpoints"]
+      verbs: ["get", "list", "watch"]
+
+# Development/Dev settings
+development:
+  enabled: true
+  debug: true
+  mockData: true
+  localPorts:
+    backend: 30050
+    frontend: 30030
+    database: 30432
+    redis: 30379
+    prometheus: 30090
+    grafana: 30003

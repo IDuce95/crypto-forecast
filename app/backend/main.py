@@ -46,28 +46,28 @@ def read_root() -> Dict[str, str]:
 
 @app.post(config.api_endpoints.train_dt_endpoint)
 def train_decision_tree_endpoint(
-    request: pydantic_models.DecisionTreeRequest
+    request: pydantic_models.TrainingRequest
 ) -> Dict[str, Any]:
 
     return handlers.handle_training_request(model_trainer.train_decision_tree, "decision_tree", request)
 
 @app.post(config.api_endpoints.train_rf_endpoint)
 def train_random_forest_endpoint(
-    request: pydantic_models.RandomForestRequest
+    request: pydantic_models.TrainingRequest
 ) -> Dict[str, Any]:
 
     return handlers.handle_training_request(model_trainer.train_random_forest, "random_forest", request)
 
 @app.post(config.api_endpoints.train_xgb_endpoint)
 def train_xgboost_endpoint(
-    request: pydantic_models.XGBoostRequest
+    request: pydantic_models.TrainingRequest
 ) -> Dict[str, Any]:
 
     return handlers.handle_training_request(model_trainer.train_xgboost, "xgboost", request)
 
 @app.post(config.api_endpoints.train_lasso_endpoint)
 def train_lasso_endpoint(
-    request: pydantic_models.LassoRequest
+    request: pydantic_models.TrainingRequest
 ) -> Dict[str, Any]:
 
     return handlers.handle_training_request(model_trainer.train_lasso, "lasso", request)

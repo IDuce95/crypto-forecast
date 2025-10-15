@@ -28,6 +28,15 @@ host = "localhost"
 port = 5432
 name = "crypto_forecasting"
 user = "postgres"
+
+[default.cache]
+enabled = true
+host = "localhost"
+port = 6379
+db = 0
+default_ttl_hours = 24
+model_metadata_ttl_hours = 168
+processed_data_ttl_hours = 48
 password = ""
 
 [default.model_settings]
@@ -53,39 +62,3 @@ file_path = "./logs/app.log"
 
 [default.other]
 gitkeep_filename = ".gitkeep"
-
-[development]
-
-[development.rest_api_settings]
-backend_hostname = "localhost"
-backend_container_name = "backend"
-port = 5000
-
-[development.database]
-type = "sqlite"
-path = "./crypto_forecasting_dev.db"
-
-[development.logging]
-level = "DEBUG"
-format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-file_path = "./logs/app_dev.log"
-
-[production]
-
-[production.rest_api_settings]
-backend_hostname = "0.0.0.0"
-backend_container_name = "backend"
-port = 5000
-
-[production.database]
-type = "postgresql"
-host = "db"
-port = 5432
-name = "crypto_forecasting"
-user = "postgres"
-password = "prod_password"
-
-[production.logging]
-level = "INFO"
-format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-file_path = "/app/logs/app.log"

@@ -1,0 +1,14 @@
+artifact_uri: file:///home/palianm/Desktop/crypto-forecasting/mlruns/981382637389252930/09ba1a77ee5f4eabb5da1e1ff73e88f8/artifacts
+end_time: 1753773887379
+entry_point_name: ''
+experiment_id: '981382637389252930'
+lifecycle_stage: active
+run_id: 09ba1a77ee5f4eabb5da1e1ff73e88f8
+run_name: pipeline_exp_20250729_092447_Bitcoin_random_forest
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1753773887356
+status: 4
+tags: []
+user_id: palianm

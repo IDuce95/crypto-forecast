@@ -1,0 +1,39 @@
+apiVersion: v2
+name: crypto-forecasting
+description: A Helm chart for Crypto Forecasting ML application - DEV ENVIRONMENT
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+home: https://github.com/IDuce95/crypto-forecast
+sources:
+  - https://github.com/IDuce95/crypto-forecast
+maintainers:
+  - name: Crypto Forecasting Team
+    email: team@crypto-forecasting.dev
+
+keywords:
+  - machine-learning
+  - cryptocurrency
+  - forecasting
+  - python
+  - fastapi
+  - react
+  - dev-environment
+
+# Simplified dependencies for dev environment
+dependencies:
+  - name: postgresql
+    version: "12.1.9"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: "17.4.3"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+
+# Dev environment notes
+annotations:
+  category: Machine Learning
+  environment: dev
+  deployment: simplified
+  licenses: MIT

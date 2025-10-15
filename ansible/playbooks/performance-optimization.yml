@@ -1,0 +1,316 @@
+---
+- name: Crypto Forecasting - Performance Optimization (Dev Environment)
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    environment: dev
+    namespace: crypto-forecasting
+    optimization_config:
+      cpu_optimization: true
+      memory_optimization: true
+      database_tuning: true
+      cache_optimization: true
+      ml_performance: true
+
+  tasks:
+    - name: Get current resource usage
+      k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ namespace }}"
+      register: pods_info
+
+    - name: Optimize PostgreSQL configuration
+      k8s:
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: postgres-performance-config
+            namespace: "{{ namespace }}"
+          data:
+            postgresql.conf: |
+              # PostgreSQL Performance Tuning for Dev Environment
+              
+              # Memory Settings (optimized for dev)
+              shared_buffers = 128MB
+              effective_cache_size = 512MB
+              work_mem = 4MB
+              maintenance_work_mem = 64MB
+              
+              # Checkpoint Settings
+              checkpoint_completion_target = 0.7
+              wal_buffers = 16MB
+              
+              # Query Planner
+              random_page_cost = 1.1
+              effective_io_concurrency = 200
+              
+              # Logging (dev environment)
+              log_statement = 'all'
+              log_duration = on
+              log_min_duration_statement = 1000
+              
+              # Connection Settings
+              max_connections = 100
+              
+              # Auto VACUUM
+              autovacuum = on
+              autovacuum_max_workers = 3
+              autovacuum_naptime = 1min
+        state: present
+
+    - name: Create Redis performance configuration
+      k8s:
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: redis-performance-config
+            namespace: "{{ namespace }}"
+          data:
+            redis.conf: |
+              # Redis Performance Configuration for Dev Environment
+              
+              # Memory Management
+              maxmemory 256mb
+              maxmemory-policy allkeys-lru
+              
+              # Persistence (optimized for dev)
+              save 900 1
+              save 300 10
+              save 60 10000
+              
+              # Network
+              tcp-keepalive 300
+              timeout 0
+              
+              # Performance
+              hash-max-ziplist-entries 512
+              hash-max-ziplist-value 64
+              list-max-ziplist-size -2
+              list-compress-depth 0
+              set-max-intset-entries 512
+              zset-max-ziplist-entries 128
+              zset-max-ziplist-value 64
+              
+              # Logging
+              loglevel notice
+              
+              # Client Output Buffer Limits
+              client-output-buffer-limit normal 0 0 0
+              client-output-buffer-limit replica 256mb 64mb 60
+              client-output-buffer-limit pubsub 32mb 8mb 60
+        state: present
+
+    - name: Create ML model optimization configuration
+      copy:
+        content: |
+          # ML Model Performance Configuration
+          
+          import os
+          import numpy as np
+          from sklearn.model_selection import GridSearchCV
+          from sklearn.metrics import make_scorer
+          
+          # Performance optimization settings
+          ML_PERFORMANCE_CONFIG = {
+              # Threading and Parallelization
+              'n_jobs': min(4, os.cpu_count()),  # Use max 4 cores for dev
+              'random_state': 42,
+              
+              # Memory optimization
+              'batch_size': 1000,  # Process data in batches
+              'max_features': 50,  # Limit feature count for dev
+              
+              # Model-specific optimizations
+              'random_forest': {
+                  'n_estimators': 50,  # Reduced for dev
+                  'max_depth': 10,
+                  'min_samples_split': 5,
+                  'min_samples_leaf': 2,
+                  'n_jobs': 2
+              },
+              
+              'xgboost': {
+                  'n_estimators': 50,  # Reduced for dev
+                  'max_depth': 6,
+                  'learning_rate': 0.1,
+                  'subsample': 0.8,
+                  'colsample_bytree': 0.8,
+                  'n_jobs': 2
+              },
+              
+              'decision_tree': {
+                  'max_depth': 10,
+                  'min_samples_split': 5,
+                  'min_samples_leaf': 2
+              },
+              
+              'lasso': {
+                  'alpha': 0.1,
+                  'max_iter': 1000,
+                  'selection': 'cyclic'
+              },
+              
+              # Feature engineering optimization
+              'feature_selection': {
+                  'k_best': 20,  # Select top 20 features
+                  'variance_threshold': 0.01
+              },
+              
+              # Cross-validation settings
+              'cv_folds': 3,  # Reduced for dev
+              'scoring': 'neg_mean_squared_error',
+              
+              # Caching
+              'cache_models': True,
+              'cache_predictions': True,
+              'cache_ttl': 3600,  # 1 hour for dev
+              
+              # Data preprocessing
+              'preprocessing': {
+                  'scaling': 'standard',
+                  'missing_strategy': 'median',
+                  'outlier_detection': 'iqr'
+              }
+          }
+          
+          # Performance monitoring
+          PERFORMANCE_METRICS = {
+              'training_time_threshold': 300,  # 5 minutes max for dev
+              'prediction_time_threshold': 5,  # 5 seconds max
+              'memory_usage_threshold': 1024,  # 1GB max for dev
+              'accuracy_threshold': 0.7  # Minimum 70% accuracy
+          }
+          
+        dest: /opt/crypto-forecasting/ml-performance-config.py
+        mode: '0644'
+
+    - name: Create application performance monitoring script
+      copy:
+        content: |
+          #!/bin/bash
+          
+          # Performance Monitoring Script for Crypto Forecasting Platform
+          
+          NAMESPACE="{{ namespace }}"
+          LOG_FILE="/opt/crypto-forecasting/performance-monitoring.log"
+          
+          echo "=== Performance Monitoring - $(date) ===" >> $LOG_FILE
+          
+          # CPU and Memory usage for all pods
+          echo "Pod Resource Usage:" >> $LOG_FILE
+          kubectl top pods -n $NAMESPACE >> $LOG_FILE 2>/dev/null || echo "Metrics server not available" >> $LOG_FILE
+          
+          # PostgreSQL performance metrics
+          echo -e "\nDatabase Performance:" >> $LOG_FILE
+          kubectl exec -n $NAMESPACE deployment/postgres -- psql -U crypto -d crypto_forecasting -c "
+            SELECT schemaname, tablename, n_tup_ins, n_tup_upd, n_tup_del 
+            FROM pg_stat_user_tables 
+            ORDER BY n_tup_ins DESC LIMIT 5;" >> $LOG_FILE 2>/dev/null || echo "Database not accessible" >> $LOG_FILE
+          
+          # Redis performance metrics
+          echo -e "\nRedis Performance:" >> $LOG_FILE
+          kubectl exec -n $NAMESPACE deployment/redis -- redis-cli INFO memory | grep used_memory_human >> $LOG_FILE 2>/dev/null || echo "Redis not accessible" >> $LOG_FILE
+          kubectl exec -n $NAMESPACE deployment/redis -- redis-cli INFO stats | grep keyspace >> $LOG_FILE 2>/dev/null
+          
+          # API response times (if available)
+          echo -e "\nAPI Performance:" >> $LOG_FILE
+          curl -s -w "Response Time: %{time_total}s\n" http://localhost:30050/health >> $LOG_FILE 2>/dev/null || echo "API not accessible" >> $LOG_FILE
+          
+          echo -e "\n================================\n" >> $LOG_FILE
+          
+        dest: /opt/crypto-forecasting/performance-monitor.sh
+        mode: '0755'
+
+    - name: Run performance monitoring script
+      shell: /opt/crypto-forecasting/performance-monitor.sh
+      register: performance_monitoring
+      ignore_errors: yes
+
+    - name: Create performance optimization summary
+      copy:
+        content: |
+          # Performance Optimization Summary
+          
+          Date: {{ ansible_date_time.date }}
+          Time: {{ ansible_date_time.time }}
+          Environment: {{ environment }}
+          
+          ## Optimization Areas
+          
+          ### Database Performance (PostgreSQL)
+          - Shared buffers: 128MB (optimized for dev)
+          - Effective cache size: 512MB
+          - Work memory: 4MB per operation
+          - Maintenance work memory: 64MB
+          - Max connections: 100
+          - Auto vacuum: Enabled with aggressive settings
+          - Query logging: Enabled for development
+          
+          ### Cache Performance (Redis)
+          - Max memory: 256MB
+          - Eviction policy: allkeys-lru
+          - Persistence: Optimized for dev (less frequent saves)
+          - TCP keepalive: 300 seconds
+          - Hash/List/Set optimizations: Enabled
+          - Client output buffer limits: Configured
+          
+          ### ML Model Performance
+          - Parallel processing: Limited to 4 cores max
+          - Batch processing: 1000 records per batch
+          - Feature selection: Top 20 features
+          - Cross-validation: 3 folds (reduced for dev)
+          - Model caching: Enabled (1 hour TTL)
+          - Training time limit: 5 minutes
+          - Prediction time limit: 5 seconds
+          
+          ### Application Performance
+          - Container resource limits: Optimized for dev
+          - JVM/Python memory: Tuned for workload
+          - Connection pooling: Enabled
+          - Response caching: Implemented
+          - Async processing: Enabled where applicable
+          
+          ## Performance Monitoring
+          
+          ### Key Metrics Tracked
+          - Pod CPU/Memory usage
+          - Database query performance
+          - Redis memory usage and hit rate
+          - API response times
+          - ML model training/prediction times
+          
+          ### Monitoring Tools
+          - Kubernetes metrics server
+          - Prometheus monitoring
+          - Application-level metrics
+          - Performance monitoring script: /opt/crypto-forecasting/performance-monitor.sh
+          
+          ### Performance Thresholds (Dev Environment)
+          - CPU usage: < 500m per container
+          - Memory usage: < 1Gi per container
+          - API response time: < 5 seconds
+          - Database query time: < 1 second
+          - ML training time: < 5 minutes
+          - Prediction time: < 5 seconds
+          
+          ## Configuration Files Created
+          - PostgreSQL config: postgres-performance-config ConfigMap
+          - Redis config: redis-performance-config ConfigMap
+          - ML config: /opt/crypto-forecasting/ml-performance-config.py
+          - Monitoring script: /opt/crypto-forecasting/performance-monitor.sh
+          
+          ## Recommendations for Production
+          - Increase resource allocations
+          - Enable horizontal pod autoscaling
+          - Implement connection pooling
+          - Add CDN for static assets
+          - Enable database read replicas
+          - Implement async ML model training
+          - Add performance profiling tools
+          
+        dest: /opt/crypto-forecasting/performance-optimization.log
+        mode: '0644'

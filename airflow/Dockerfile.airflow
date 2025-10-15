@@ -1,0 +1,72 @@
+
+ARG AIRFLOW_VERSION=2.10.3
+ARG PYTHON_VERSION=3.12
+
+FROM apache/airflow:${AIRFLOW_VERSION}-python${PYTHON_VERSION}
+
+USER root
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    git \
+    libpq-dev \
+    gcc \
+    g++ \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y openjdk-11-jdk-headless \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+
+USER airflow
+
+WORKDIR /opt/airflow
+
+COPY requirements.txt /opt/airflow/requirements.txt
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+RUN pip install --no-cache-dir \
+    apache-airflow-providers-postgres==6.2.1 \
+    apache-airflow-providers-redis==4.1.1 \
+    apache-airflow-providers-http==5.3.2 \
+    apache-airflow-providers-ssh==3.12.0
+
+RUN pip install --no-cache-dir \
+    pyspark==4.0.0 \
+    findspark==2.0.1 \
+    torch==2.2.0 \
+    transformers==4.36.2 \
+    scikit-learn==1.4.0 \
+    xgboost==2.0.3 \
+    lightgbm==4.3.0 \
+    optuna==3.5.0 \
+    redis==6.2.0 \
+    psycopg2-binary==2.9.10
+
+COPY --chown=airflow:root app/ /opt/airflow/app/
+COPY --chown=airflow:root airflow/dags/ /opt/airflow/dags/
+COPY --chown=airflow:root airflow/plugins/ /opt/airflow/plugins/
+
+RUN mkdir -p /opt/airflow/logs \
+    /opt/airflow/data \
+    /opt/airflow/models \
+    /opt/airflow/cache \
+    /opt/airflow/config
+
+ENV AIRFLOW_HOME=/opt/airflow
+ENV PYTHONPATH="/opt/airflow:/opt/airflow/app:$PYTHONPATH"
+ENV AIRFLOW__CORE__LOAD_EXAMPLES=False
+ENV AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=False
+ENV AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
+
+RUN airflow config list > /dev/null
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=60s \
+    CMD airflow jobs check --job-type SchedulerJob --hostname $(hostname) || exit 1
+
+CMD ["airflow", "webserver"]

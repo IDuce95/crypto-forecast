@@ -1,0 +1,180 @@
+# Production environment values
+# Use this with: helm-manage.sh deploy -f values-prod.yaml
+
+# Global settings
+global:
+  environment: production
+
+# Application settings
+app:
+  replicaCount: 3
+
+  image:
+    tag: "v1.0.0"
+    pullPolicy: IfNotPresent
+
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  env:
+    LOG_LEVEL: INFO
+
+# Frontend settings
+frontend:
+  enabled: true
+  replicaCount: 2
+
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+
+# Database settings
+postgresql:
+  enabled: true
+  auth:
+    existingSecret: "crypto-forecasting-secrets"
+    secretKeys:
+      adminPasswordKey: "postgres-password"
+      userPasswordKey: "postgres-user-password"
+    username: crypto
+    database: crypto_forecasting
+  primary:
+    persistence:
+      enabled: true
+      storageClass: "fast-ssd"
+      size: 100Gi
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+      requests:
+        cpu: 1000m
+        memory: 2Gi
+
+# Redis settings
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    existingSecret: "crypto-forecasting-secrets"
+    existingSecretPasswordKey: "redis-password"
+  master:
+    persistence:
+      enabled: true
+      storageClass: "fast-ssd"
+      size: 20Gi
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+
+# Persistent storage - enabled with high-performance storage
+persistence:
+  data:
+    enabled: true
+    storageClass: "fast-ssd"
+    size: 500Gi
+  models:
+    enabled: true
+    storageClass: "fast-ssd"
+    size: 100Gi
+  logs:
+    enabled: true
+    storageClass: "standard"
+    size: 50Gi
+
+# Ingress - production setup with TLS
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+  hosts:
+    - host: crypto-forecasting.company.com
+      paths:
+        - path: /api
+          pathType: Prefix
+          service: backend
+        - path: /
+          pathType: Prefix
+          service: frontend
+  tls:
+    - secretName: crypto-forecasting-tls
+      hosts:
+        - crypto-forecasting.company.com
+
+# Monitoring - full production monitoring
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    server:
+      retention: "30d"
+      resources:
+        limits:
+          cpu: 2000m
+          memory: 8Gi
+        requests:
+          cpu: 1000m
+          memory: 4Gi
+      persistence:
+        enabled: true
+        storageClass: "fast-ssd"
+        size: 100Gi
+  grafana:
+    enabled: true
+    adminPassword: ""  # Will be generated
+    persistence:
+      enabled: true
+      storageClass: "standard"
+      size: 10Gi
+    resources:
+      limits:
+        cpu: 500m
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+
+# Production specific
+production:
+  enabled: true
+  security:
+    networkPolicies: true
+    podSecurityPolicy: true
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2 AM
+  alerts:
+    enabled: true
+    webhookUrl: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"

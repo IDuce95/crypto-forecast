@@ -1,0 +1,254 @@
+---
+- name: Crypto Forecasting - Monitoring Setup (Prometheus & Grafana)
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    environment: dev
+    namespace: crypto-forecasting
+    prometheus_config:
+      host: localhost
+      port: 30090
+      retention: "7d"
+      scrape_interval: "30s"
+      evaluation_interval: "30s"
+    grafana_config:
+      host: localhost
+      port: 30003
+      admin_user: admin
+      admin_password: admin
+
+  tasks:
+    - name: Wait for Prometheus deployment to be ready
+      k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: prometheus
+        namespace: "{{ namespace }}"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+      register: prometheus_deployment
+      ignore_errors: yes
+
+    - name: Wait for Grafana deployment to be ready
+      k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: grafana
+        namespace: "{{ namespace }}"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+      register: grafana_deployment
+      ignore_errors: yes
+
+    - name: Test Prometheus connectivity
+      uri:
+        url: "http://{{ prometheus_config.host }}:{{ prometheus_config.port }}/-/healthy"
+        method: GET
+        timeout: 10
+      register: prometheus_health
+      ignore_errors: yes
+
+    - name: Test Grafana connectivity
+      uri:
+        url: "http://{{ grafana_config.host }}:{{ grafana_config.port }}/api/health"
+        method: GET
+        timeout: 10
+      register: grafana_health
+      ignore_errors: yes
+
+    - name: Check Prometheus targets
+      uri:
+        url: "http://{{ prometheus_config.host }}:{{ prometheus_config.port }}/api/v1/targets"
+        method: GET
+        timeout: 10
+      register: prometheus_targets
+      when: prometheus_health is succeeded
+      ignore_errors: yes
+
+    - name: Create Grafana datasource configuration
+      copy:
+        content: |
+          {
+            "name": "Prometheus",
+            "type": "prometheus",
+            "url": "http://prometheus-service:9090",
+            "access": "proxy",
+            "isDefault": true,
+            "basicAuth": false
+          }
+        dest: /opt/crypto-forecasting/grafana-datasource.json
+        mode: '0644'
+
+    - name: Create Grafana dashboard for crypto forecasting
+      copy:
+        content: |
+          {
+            "dashboard": {
+              "id": null,
+              "title": "Crypto Forecasting Dashboard",
+              "tags": ["crypto", "forecasting", "ml"],
+              "timezone": "browser",
+              "panels": [
+                {
+                  "id": 1,
+                  "title": "API Response Time",
+                  "type": "graph",
+                  "targets": [
+                    {
+                      "expr": "rate(http_request_duration_seconds_sum[5m]) / rate(http_request_duration_seconds_count[5m])",
+                      "legendFormat": "Response Time"
+                    }
+                  ],
+                  "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+                },
+                {
+                  "id": 2,
+                  "title": "Request Rate",
+                  "type": "graph",
+                  "targets": [
+                    {
+                      "expr": "rate(http_requests_total[5m])",
+                      "legendFormat": "Requests/sec"
+                    }
+                  ],
+                  "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+                },
+                {
+                  "id": 3,
+                  "title": "ML Model Accuracy",
+                  "type": "stat",
+                  "targets": [
+                    {
+                      "expr": "crypto_model_accuracy",
+                      "legendFormat": "Model Accuracy"
+                    }
+                  ],
+                  "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+                },
+                {
+                  "id": 4,
+                  "title": "Database Connections",
+                  "type": "graph",
+                  "targets": [
+                    {
+                      "expr": "pg_stat_database_numbackends",
+                      "legendFormat": "Active Connections"
+                    }
+                  ],
+                  "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+                }
+              ],
+              "time": {"from": "now-1h", "to": "now"},
+              "refresh": "30s"
+            }
+          }
+        dest: /opt/crypto-forecasting/crypto-dashboard.json
+        mode: '0644'
+
+    - name: Create monitoring alerts configuration
+      copy:
+        content: |
+          groups:
+          - name: crypto-forecasting-alerts
+            rules:
+            - alert: HighErrorRate
+              expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.1
+              for: 5m
+              labels:
+                severity: warning
+              annotations:
+                summary: "High error rate detected"
+                description: "Error rate is above 10% for 5 minutes"
+                
+            - alert: DatabaseDown
+              expr: up{job="postgres"} == 0
+              for: 1m
+              labels:
+                severity: critical
+              annotations:
+                summary: "Database is down"
+                description: "PostgreSQL database is not responding"
+                
+            - alert: RedisDown
+              expr: up{job="redis"} == 0
+              for: 1m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Redis is down"
+                description: "Redis cache is not responding"
+                
+            - alert: HighMemoryUsage
+              expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) > 0.8
+              for: 5m
+              labels:
+                severity: warning
+              annotations:
+                summary: "High memory usage"
+                description: "Container memory usage is above 80%"
+                
+            - alert: ModelAccuracyDrop
+              expr: crypto_model_accuracy < 0.7
+              for: 10m
+              labels:
+                severity: warning
+              annotations:
+                summary: "ML model accuracy dropped"
+                description: "Model accuracy is below 70%"
+        dest: /opt/crypto-forecasting/monitoring-alerts.yml
+        mode: '0644'
+
+    - name: Create monitoring setup summary
+      copy:
+        content: |
+          # Monitoring Setup Summary
+          
+          Date: {{ ansible_date_time.date }}
+          Time: {{ ansible_date_time.time }}
+          Environment: {{ environment }}
+          
+          ## Prometheus Configuration
+          - Host: {{ prometheus_config.host }}
+          - Port: {{ prometheus_config.port }}
+          - Retention: {{ prometheus_config.retention }}
+          - Scrape Interval: {{ prometheus_config.scrape_interval }}
+          - Health Status: {{ 'Healthy' if prometheus_health is succeeded else 'Unhealthy' }}
+          
+          ## Grafana Configuration
+          - Host: {{ grafana_config.host }}
+          - Port: {{ grafana_config.port }}
+          - Admin User: {{ grafana_config.admin_user }}
+          - Health Status: {{ 'Healthy' if grafana_health is succeeded else 'Unhealthy' }}
+          
+          ## Dashboards Created
+          - Crypto Forecasting Dashboard: /opt/crypto-forecasting/crypto-dashboard.json
+          - Grafana Datasource Config: /opt/crypto-forecasting/grafana-datasource.json
+          
+          ## Alerts Configured
+          - High Error Rate Alert
+          - Database Down Alert
+          - Redis Down Alert
+          - High Memory Usage Alert
+          - Model Accuracy Drop Alert
+          
+          ## Access URLs
+          - Prometheus: http://{{ prometheus_config.host }}:{{ prometheus_config.port }}
+          - Grafana: http://{{ grafana_config.host }}:{{ grafana_config.port }}
+          
+          ## Key Metrics to Monitor
+          - API response times
+          - Request rates and error rates
+          - Database connection count
+          - Redis memory usage
+          - ML model accuracy
+          - Container resource usage
+          
+        dest: /opt/crypto-forecasting/monitoring-setup.log
+        mode: '0644'

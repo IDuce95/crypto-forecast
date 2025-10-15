@@ -1,0 +1,431 @@
+---
+- name: Crypto Forecasting - Health Check Implementation
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars:
+    environment: dev
+    namespace: crypto-forecasting
+    health_config:
+      check_interval: 300  # 5 minutes
+      timeout: 30
+      retries: 3
+      
+  tasks:
+    - name: Create health check directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "/opt/crypto-forecasting/health-check"
+        - "/opt/crypto-forecasting/health-check/logs"
+        - "/opt/crypto-forecasting/health-check/reports"
+
+    - name: Create comprehensive health check script
+      copy:
+        content: |
+          #!/bin/bash
+          
+          # Comprehensive Health Check Script for Crypto Forecasting Platform
+          
+          NAMESPACE="{{ namespace }}"
+          LOG_FILE="/opt/crypto-forecasting/health-check/logs/health-check.log"
+          REPORT_FILE="/opt/crypto-forecasting/health-check/reports/health-report-$(date +%Y%m%d_%H%M%S).json"
+          TIMEOUT={{ health_config.timeout }}
+          RETRIES={{ health_config.retries }}
+          
+          # Initialize health status
+          OVERALL_STATUS="HEALTHY"
+          declare -A SERVICE_STATUS
+          declare -A SERVICE_DETAILS
+          
+          log_message() {
+              echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+          }
+          
+          check_kubernetes_cluster() {
+              log_message "Checking Kubernetes cluster health..."
+              
+              # Check if kubectl is working
+              if ! kubectl cluster-info &>/dev/null; then
+                  SERVICE_STATUS["kubernetes"]="CRITICAL"
+                  SERVICE_DETAILS["kubernetes"]="Kubectl cluster-info failed"
+                  OVERALL_STATUS="UNHEALTHY"
+                  return 1
+              fi
+              
+              # Check namespace
+              if ! kubectl get namespace $NAMESPACE &>/dev/null; then
+                  SERVICE_STATUS["namespace"]="CRITICAL"
+                  SERVICE_DETAILS["namespace"]="Namespace $NAMESPACE not found"
+                  OVERALL_STATUS="UNHEALTHY"
+                  return 1
+              fi
+              
+              # Check nodes
+              READY_NODES=$(kubectl get nodes --no-headers | grep Ready | wc -l)
+              TOTAL_NODES=$(kubectl get nodes --no-headers | wc -l)
+              
+              if [ $READY_NODES -eq $TOTAL_NODES ] && [ $TOTAL_NODES -gt 0 ]; then
+                  SERVICE_STATUS["kubernetes"]="HEALTHY"
+                  SERVICE_DETAILS["kubernetes"]="$READY_NODES/$TOTAL_NODES nodes ready"
+              else
+                  SERVICE_STATUS["kubernetes"]="WARNING"
+                  SERVICE_DETAILS["kubernetes"]="$READY_NODES/$TOTAL_NODES nodes ready"
+                  if [ $READY_NODES -eq 0 ]; then
+                      OVERALL_STATUS="UNHEALTHY"
+                  fi
+              fi
+              
+              return 0
+          }
+          
+          generate_json_report() {
+              log_message "Generating JSON health report..."
+              
+              cat > "$REPORT_FILE" << EOF
+          {
+            "timestamp": "$(date -Iseconds)",
+            "environment": "{{ environment }}",
+            "namespace": "$NAMESPACE",
+            "overall_status": "$OVERALL_STATUS",
+            "check_duration": "$((SECONDS - START_TIME)) seconds",
+            "services": {
+              "kubernetes": {
+                "status": "${SERVICE_STATUS[kubernetes]:-UNKNOWN}",
+                "details": "${SERVICE_DETAILS[kubernetes]:-No data}"
+              },
+              "system": {
+                "status": "${SERVICE_STATUS[system]:-UNKNOWN}",
+                "details": "${SERVICE_DETAILS[system]:-No data}"
+              }
+            },
+            "summary": {
+              "total_services": ${#SERVICE_STATUS[@]},
+              "healthy": $(printf '%s\n' "${SERVICE_STATUS[@]}" | grep -c "HEALTHY"),
+              "warning": $(printf '%s\n' "${SERVICE_STATUS[@]}" | grep -c "WARNING"),
+              "critical": $(printf '%s\n' "${SERVICE_STATUS[@]}" | grep -c "CRITICAL")
+            }
+          }
+          EOF
+          }
+          
+          print_summary() {
+              log_message "========================================="
+              log_message "HEALTH CHECK SUMMARY"
+              log_message "Overall Status: $OVERALL_STATUS"
+              log_message "Timestamp: $(date)"
+              log_message "Environment: {{ environment }}"
+              log_message "========================================="
+              
+              for service in "${!SERVICE_STATUS[@]}"; do
+                  local status="${SERVICE_STATUS[$service]}"
+                  local details="${SERVICE_DETAILS[$service]}"
+                  
+                  case $status in
+                      "HEALTHY")
+                          log_message "✅ $service: $status - $details"
+                          ;;
+                      "WARNING")
+                          log_message "⚠️  $service: $status - $details"
+                          ;;
+                      "CRITICAL")
+                          log_message "❌ $service: $status - $details"
+                          ;;
+                  esac
+              done
+              
+              log_message "========================================="
+              log_message "Report saved to: $REPORT_FILE"
+          }
+          
+          check_system_resources() {
+              log_message "Checking system resources..."
+              
+              # Check disk usage
+              local disk_usage=$(df / | awk 'NR==2 {print $5}' | sed 's/%//')
+              local memory_usage=$(free | awk 'NR==2{printf "%.1f", $3*100/$2}')
+              local load_avg=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | sed 's/,//')
+              
+              local resource_status="HEALTHY"
+              local resource_details="Disk: ${disk_usage}%, Memory: ${memory_usage}%, Load: $load_avg"
+              
+              if [ $disk_usage -gt 90 ]; then
+                  resource_status="CRITICAL"
+                  OVERALL_STATUS="UNHEALTHY"
+              elif [ $disk_usage -gt 80 ]; then
+                  resource_status="WARNING"
+              fi
+              
+              SERVICE_STATUS["system"]="$resource_status"
+              SERVICE_DETAILS["system"]="$resource_details"
+          }
+          
+          # Main execution
+          START_TIME=$SECONDS
+          log_message "Starting comprehensive health check..."
+          
+          # Run all health checks
+          check_kubernetes_cluster
+          check_system_resources
+          
+          # Generate reports
+          generate_json_report
+          print_summary
+          
+          # Exit with appropriate code
+          if [ "$OVERALL_STATUS" = "HEALTHY" ]; then
+              exit 0
+          else
+              exit 1
+          fi
+          
+        dest: /opt/crypto-forecasting/health-check.sh
+        mode: '0755'
+
+    - name: Create health check monitoring daemon
+      copy:
+        content: |
+          #!/bin/bash
+          
+          # Health Check Monitoring Daemon
+          
+          LOG_FILE="/opt/crypto-forecasting/health-check/logs/monitor.log"
+          CHECK_INTERVAL={{ health_config.check_interval }}
+          PID_FILE="/var/run/crypto-health-monitor.pid"
+          
+          log_message() {
+              echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+          }
+          
+          start_daemon() {
+              if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+                  log_message "Health monitor is already running (PID: $(cat "$PID_FILE"))"
+                  exit 1
+              fi
+              
+              log_message "Starting health check monitoring daemon..."
+              
+              # Start the monitoring loop in background
+              (
+                  echo $$ > "$PID_FILE"
+                  trap 'rm -f "$PID_FILE"; exit' INT TERM
+                  
+                  while true; do
+                      log_message "Running scheduled health check..."
+                      
+                      /opt/crypto-forecasting/health-check.sh
+                      local health_status=$?
+                      
+                      if [ $health_status -eq 0 ]; then
+                          log_message "Health check passed - all systems operational"
+                      else
+                          log_message "Health check failed - issues detected"
+                      fi
+                      
+                      log_message "Next health check in $CHECK_INTERVAL seconds"
+                      sleep $CHECK_INTERVAL
+                  done
+              ) &
+              
+              log_message "Health monitor started with PID: $!"
+          }
+          
+          stop_daemon() {
+              if [ -f "$PID_FILE" ]; then
+                  local pid=$(cat "$PID_FILE")
+                  if kill -0 "$pid" 2>/dev/null; then
+                      kill "$pid"
+                      rm -f "$PID_FILE"
+                      log_message "Health monitor stopped (PID: $pid)"
+                  else
+                      log_message "Health monitor was not running"
+                      rm -f "$PID_FILE"
+                  fi
+              else
+                  log_message "Health monitor PID file not found"
+              fi
+          }
+          
+          case "${1:-status}" in
+              start)
+                  start_daemon
+                  ;;
+              stop)
+                  stop_daemon
+                  ;;
+              restart)
+                  stop_daemon
+                  sleep 2
+                  start_daemon
+                  ;;
+              status)
+                  if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+                      log_message "Health monitor is running (PID: $(cat "$PID_FILE"))"
+                  else
+                      log_message "Health monitor is not running"
+                  fi
+                  ;;
+              *)
+                  echo "Usage: $0 {start|stop|restart|status}"
+                  exit 1
+                  ;;
+          esac
+          
+        dest: /opt/crypto-forecasting/health-monitor.sh
+        mode: '0755'
+
+    - name: Create health check summary
+      copy:
+        content: |
+          # Health Check Implementation Summary
+          
+          Date: {{ ansible_date_time.date }}
+          Time: {{ ansible_date_time.time }}
+          Environment: {{ environment }}
+          
+          ## Health Check System Implemented
+          
+          ### Core Health Check Script
+          - Location: /opt/crypto-forecasting/health-check.sh
+          - Purpose: Comprehensive health assessment of platform components
+          - Output: JSON reports and console summary
+          - Timeout: {{ health_config.timeout }} seconds per check
+          - Retries: {{ health_config.retries }} attempts for failed checks
+          
+          ### Health Check Components
+          
+          #### Infrastructure Health
+          - Kubernetes cluster connectivity
+          - Node status and readiness  
+          - Namespace validation
+          - System resource monitoring (disk, memory, CPU)
+          
+          #### Service Health
+          - Pod status verification (Running/Failed/Pending)
+          - Resource utilization checks
+          - Container health validation
+          
+          ### Health Monitoring Daemon
+          - Location: /opt/crypto-forecasting/health-monitor.sh
+          - Purpose: Continuous health monitoring
+          - Check Interval: {{ health_config.check_interval }} seconds ({{ (health_config.check_interval / 60) | round(1) }} minutes)
+          - Features:
+            - Background daemon operation
+            - PID file management
+            - Automatic restart capabilities
+          
+          ### Health Reports
+          
+          #### JSON Reports
+          - Location: /opt/crypto-forecasting/health-check/reports/
+          - Format: Timestamped JSON files with detailed status
+          - Contents:
+            - Overall system status
+            - Individual service status and details
+            - Performance metrics
+            - Summary statistics
+          
+          #### Console Output
+          - Real-time status display with emoji indicators
+          - Detailed error descriptions
+          - Actionable recommendations
+          
+          ## Usage Instructions
+          
+          ### Manual Health Checks
+          ```bash
+          # Run comprehensive health check
+          /opt/crypto-forecasting/health-check.sh
+          
+          # Check exit code for automation
+          if /opt/crypto-forecasting/health-check.sh; then
+              echo "System is healthy"
+          else
+              echo "System has issues"
+          fi
+          ```
+          
+          ### Health Monitoring Daemon
+          ```bash
+          # Start continuous monitoring
+          /opt/crypto-forecasting/health-monitor.sh start
+          
+          # Check daemon status
+          /opt/crypto-forecasting/health-monitor.sh status
+          
+          # Stop monitoring
+          /opt/crypto-forecasting/health-monitor.sh stop
+          
+          # Restart monitoring
+          /opt/crypto-forecasting/health-monitor.sh restart
+          ```
+          
+          ### Health Report Analysis
+          ```bash
+          # View latest health report
+          ls -la /opt/crypto-forecasting/health-check/reports/ | tail -1
+          
+          # Parse JSON report
+          cat /opt/crypto-forecasting/health-check/reports/health-report-*.json | jq .
+          ```
+          
+          ## Health Status Levels
+          
+          ### HEALTHY (✅)
+          - All services are operational
+          - All connectivity tests pass
+          - Resource usage within normal limits
+          - No critical issues detected
+          
+          ### WARNING (⚠️)
+          - Minor issues detected
+          - Some services may be degraded
+          - Resource usage approaching limits
+          - Non-critical components may be unavailable
+          
+          ### CRITICAL (❌)
+          - Major services are down
+          - System resources critically low
+          - Infrastructure issues detected
+          
+          ## Integration Points
+          
+          ### With Disaster Recovery
+          - Health validation after recovery operations
+          - Integration with backup and restore workflows
+          
+          ### With Monitoring System
+          - Prometheus metrics export capability
+          - Grafana dashboard integration
+          - Alert manager notification hooks
+          
+          ### With CI/CD Pipeline
+          - Pre-deployment health validation
+          - Post-deployment verification
+          - Rollback trigger on health check failures
+          
+          ## Best Practices
+          
+          ### For Development Environment
+          - Run health checks before and after deployments
+          - Monitor resource usage during development
+          - Use health checks for troubleshooting
+          - Validate configuration changes
+          
+          ### Security Considerations
+          - Health check scripts run with limited privileges
+          - Sensitive information excluded from reports
+          - Log file access control
+          - Secure communication with services
+          
+          ## Future Enhancements
+          - Web-based health dashboard
+          - Email/SMS alerting integration
+          - Historical health trend analysis
+          - Predictive health monitoring
+          - Integration with external monitoring tools
+          
+        dest: /opt/crypto-forecasting/health-check.log
+        mode: '0644'

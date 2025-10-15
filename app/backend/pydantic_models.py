@@ -1,33 +1,91 @@
-from pydantic import BaseModel
-from typing import Optional, Dict
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, List, Union
+from datetime import datetime
+from enum import Enum
 
-class DecisionTreeRequest(BaseModel):
-    max_depth: Optional[int] = None
-    min_samples_split: int = 2
-    min_samples_leaf: int = 1
-    dataset_name: str = "Bitcoin"
-    prediction_horizon: int = 1
+class CryptocurrencyEnum(str, Enum):
+    BITCOIN = "Bitcoin"
+    ETHEREUM = "Ethereum"
+    LITECOIN = "Litecoin"
+    XRP = "XRP"
+    DOGECOIN = "Dogecoin"
+    MONERO = "Monero"
+    STELLAR = "Stellar"
+    NEM = "NEM"
+    TETHER = "Tether"
 
-class RandomForestRequest(BaseModel):
-    n_estimators: int = 100
-    max_depth: Optional[int] = None
-    min_samples_split: int = 2
-    dataset_name: str = "Bitcoin"
-    prediction_horizon: int = 1
+class ModelTypeEnum(str, Enum):
+    DECISION_TREE = "decision_tree"
+    RANDOM_FOREST = "random_forest"
+    XGBOOST = "xgboost"
+    LASSO = "lasso"
 
-class XGBoostRequest(BaseModel):
-    n_estimators: int = 100
-    max_depth: int = 6
-    learning_rate: float = 0.1
-    dataset_name: str = "Bitcoin"
-    prediction_horizon: int = 1
+class SplitMethodEnum(str, Enum):
+    PERCENTAGE = "percentage"
+    TEMPORAL = "temporal"
 
-class LassoRequest(BaseModel):
-    alpha: float = 1.0
-    max_iter: int = 1000
-    tol: float = 0.0001
-    dataset_name: str = "Bitcoin"
-    prediction_horizon: int = 1
+class TrainingRequest(BaseModel):
+    symbol: CryptocurrencyEnum = Field(default=CryptocurrencyEnum.BITCOIN)
+    model_type: ModelTypeEnum = Field(default=ModelTypeEnum.RANDOM_FOREST)
+    prediction_horizon: int = Field(default=1, ge=1, le=30)
+    split_method: SplitMethodEnum = Field(default=SplitMethodEnum.PERCENTAGE)
+    test_size: float = Field(default=0.2, ge=0.1, le=0.4)
+    validation_size: float = Field(default=0.2, ge=0.1, le=0.4)
+    split_date: Optional[str] = Field(default=None)
+    feature_window: int = Field(default=7, ge=1, le=30)
+    enable_hyperparameter_tuning: bool = Field(default=False)
+    hyperparameters: Optional[Dict] = Field(default=None)
+
+class PredictionRequest(BaseModel):
+    symbol: CryptocurrencyEnum = Field(default=CryptocurrencyEnum.BITCOIN)
+    model_type: ModelTypeEnum = Field(default=ModelTypeEnum.RANDOM_FOREST)
+    prediction_steps: int = Field(default=7, ge=1, le=90)
+    use_latest_model: bool = Field(default=True)
+    model_path: Optional[str] = Field(default=None)
+
+class HyperparameterTuningRequest(BaseModel):
+    symbol: CryptocurrencyEnum = Field(default=CryptocurrencyEnum.BITCOIN)
+    model_types: List[ModelTypeEnum] = Field(default=[ModelTypeEnum.RANDOM_FOREST])
+    tuning_iterations: int = Field(default=20, ge=5, le=100)
+    cv_folds: int = Field(default=5, ge=3, le=10)
+    test_size: float = Field(default=0.2, ge=0.1, le=0.4)
+    validation_size: float = Field(default=0.2, ge=0.1, le=0.4)
+
+class ModelComparisonRequest(BaseModel):
+    symbol: CryptocurrencyEnum = Field(default=CryptocurrencyEnum.BITCOIN)
+    model_types: List[ModelTypeEnum] = Field(default=[
+        ModelTypeEnum.RANDOM_FOREST, 
+        ModelTypeEnum.XGBOOST, 
+        ModelTypeEnum.DECISION_TREE
+    ])
+    prediction_horizon: int = Field(default=1, ge=1, le=30)
+    enable_tuning: bool = Field(default=False)
+
+class MetricsResponse(BaseModel):
+    mse: float
+    mae: float
+    rmse: float
+    r2: float
+    mape: float
+
+class ModelResponse(BaseModel):
+    symbol: str
+    model_type: str
+    training_metrics: MetricsResponse
+    validation_metrics: MetricsResponse
+    test_metrics: MetricsResponse
+    model_path: str
+    training_time: float
+    feature_count: int
+    prediction_horizon: int
+
+class PredictionResponse(BaseModel):
+    symbol: str
+    model_type: str
+    predictions: List[float]
+    confidence_intervals: Optional[List[Dict[str, float]]] = None
+    prediction_dates: List[str]
+    model_metrics: MetricsResponse
 
 class OptimizationRequest(BaseModel):
     dataset_name: str = "Bitcoin"
@@ -59,3 +117,10 @@ class OptimizationRequest(BaseModel):
     lasso_max_iter_max: Optional[int] = 5000
     lasso_tol_min: Optional[float] = 0.0001
     lasso_tol_max: Optional[float] = 0.01
+
+
+class HyperparameterTuningResponse(BaseModel):
+    message: str
+    symbol: str
+    models: List[str]
+    iterations: int

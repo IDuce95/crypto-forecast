@@ -1,0 +1,80 @@
+---
+# Application management playbook
+# Use this for start, stop, restart, and update operations
+
+- name: Manage Crypto Forecasting Application
+  hosts: web_servers
+  become: yes
+  gather_facts: no
+  
+  vars:
+    action: "{{ operation | default('status') }}"
+    app_path: "/opt/{{ project_name }}/app"
+    
+  tasks:
+    - name: Display operation information
+      debug:
+        msg: "Performing {{ action }} operation on crypto-forecasting application"
+    
+    - name: Get application status
+      command: docker-compose ps --format json
+      args:
+        chdir: "{{ app_path }}"
+      register: app_status
+      become_user: "{{ app_user }}"
+      when: action in ['status', 'start', 'stop', 'restart']
+      
+    - name: Display current status
+      debug:
+        var: app_status.stdout
+      when: action == 'status'
+    
+    - name: Stop application services
+      docker_compose:
+        project_src: "{{ app_path }}"
+        state: absent
+      become_user: "{{ app_user }}"
+      when: action in ['stop', 'restart']
+      
+    - name: Pull latest changes (update operation)
+      git:
+        repo: "https://github.com/IDuce95/crypto-forecast.git"
+        dest: "{{ app_path }}"
+        version: "{{ git_branch | default('main') }}"
+        force: yes
+      become_user: "{{ app_user }}"
+      when: action == 'update'
+      
+    - name: Build application (update operation)
+      docker_compose:
+        project_src: "{{ app_path }}"
+        build: yes
+      become_user: "{{ app_user }}"
+      when: action == 'update'
+      
+    - name: Start application services
+      docker_compose:
+        project_src: "{{ app_path }}"
+        state: present
+      become_user: "{{ app_user }}"
+      when: action in ['start', 'restart', 'update']
+      
+    - name: Wait for application to be ready
+      uri:
+        url: "http://localhost:{{ app_port }}/health"
+        method: GET
+        status_code: 200
+      register: app_health
+      until: app_health.status == 200
+      retries: 30
+      delay: 10
+      ignore_errors: yes
+      when: action in ['start', 'restart', 'update']
+      
+    - name: Display operation result
+      debug:
+        msg: |
+          Operation '{{ action }}' completed.
+          {% if action in ['start', 'restart', 'update'] %}
+          Application status: {{ 'Running' if app_health.status == 200 else 'Not responding' }}
+          {% endif %}

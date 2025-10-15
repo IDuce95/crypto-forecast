@@ -1,0 +1,55 @@
+# Ingress disabled for dev environment - using NodePort services instead
+# Access services directly:
+# - Frontend: http://localhost:30030
+# - Backend API: http://localhost:30050
+# - PostgreSQL: localhost:30432
+# - Redis: localhost:30379
+# - Prometheus: http://localhost:30090
+# - Grafana: http://localhost:30003
+
+# Dev environment access guide:
+# 1. Deploy with: cd k8s && ./deploy-k8s.sh
+# 2. Access frontend: http://localhost:30030
+# 3. Access backend API: http://localhost:30050/docs (FastAPI docs)
+# 4. Connect to database: psql -h localhost -p 30432 -U crypto -d crypto_forecasting
+# 5. Connect to Redis: redis-cli -h localhost -p 30379
+
+# Port mapping for dev environment:
+# Service        | Internal Port | NodePort | Access URL
+# Frontend       | 3000         | 30030    | http://localhost:30030
+# Backend        | 5000         | 30050    | http://localhost:30050
+# PostgreSQL     | 5432         | 30432    | localhost:30432
+# Redis          | 6379         | 30379    | localhost:30379
+# Prometheus     | 9090         | 30090    | http://localhost:30090
+# Grafana        | 3000         | 30003    | http://localhost:30003
+
+# If you need ingress for dev environment with domain names,
+# install nginx-ingress controller and uncomment the following:
+
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: crypto-forecasting-ingress
+#   namespace: crypto-forecasting
+#   annotations:
+#     kubernetes.io/ingress.class: "nginx"
+#     nginx.ingress.kubernetes.io/rewrite-target: /
+# spec:
+#   rules:
+#   - host: crypto-forecasting.dev  # Add to /etc/hosts: 127.0.0.1 crypto-forecasting.dev
+#     http:
+#       paths:
+#       - path: /api
+#         pathType: Prefix
+#         backend:
+#           service:
+#             name: backend
+#             port:
+#               number: 5000
+#       - path: /
+#         pathType: Prefix
+#         backend:
+#           service:
+#             name: frontend
+#             port:
+#               number: 3000

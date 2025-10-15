@@ -1,0 +1,194 @@
+---
+# Kubernetes deployment playbook
+
+- name: Deploy Crypto Forecasting to Kubernetes
+  hosts: localhost
+  gather_facts: yes
+  
+  vars:
+    k8s_namespace: crypto-forecasting
+    deployment_method: "{{ method | default('manifests') }}"  # manifests or helm
+    image_tag: "{{ tag | default('latest') }}"
+    environment: "{{ env | default('development') }}"
+    
+  tasks:
+    - name: Check if kubectl is available
+      command: kubectl version --client
+      register: kubectl_check
+      failed_when: false
+      changed_when: false
+      
+    - name: Fail if kubectl is not available
+      fail:
+        msg: "kubectl is not installed or not in PATH"
+      when: kubectl_check.rc != 0
+      
+    - name: Check if Helm is available (when using Helm)
+      command: helm version --short
+      register: helm_check
+      failed_when: false
+      changed_when: false
+      when: deployment_method == "helm"
+      
+    - name: Fail if Helm is not available (when using Helm)
+      fail:
+        msg: "Helm is not installed or not in PATH"
+      when: deployment_method == "helm" and helm_check.rc != 0
+      
+    - name: Check cluster connectivity
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Node
+      register: cluster_check
+      failed_when: false
+      
+    - name: Fail if cluster is not accessible
+      fail:
+        msg: "Cannot connect to Kubernetes cluster"
+      when: cluster_check.failed | default(false)
+      
+    - name: Create namespace
+      kubernetes.core.k8s:
+        name: "{{ k8s_namespace }}"
+        api_version: v1
+        kind: Namespace
+        state: present
+        
+    - name: Deploy using Kubernetes manifests
+      block:
+        - name: Apply namespace configuration
+          kubernetes.core.k8s:
+            state: present
+            src: "{{ playbook_dir }}/../k8s/00-namespace-config.yaml"
+            
+        - name: Apply database and Redis
+          kubernetes.core.k8s:
+            state: present
+            src: "{{ playbook_dir }}/../k8s/01-database-redis.yaml"
+            
+        - name: Apply backend
+          kubernetes.core.k8s:
+            state: present
+            src: "{{ playbook_dir }}/../k8s/02-ml-backend.yaml"
+            
+        - name: Apply frontend
+          kubernetes.core.k8s:
+            state: present
+            src: "{{ playbook_dir }}/../k8s/03-frontend.yaml"
+            
+        - name: Apply monitoring
+          kubernetes.core.k8s:
+            state: present
+            src: "{{ playbook_dir }}/../k8s/05-monitoring.yaml"
+            
+        - name: Apply ingress
+          kubernetes.core.k8s:
+            state: present
+            src: "{{ playbook_dir }}/../k8s/06-ingress-networking.yaml"
+            
+      when: deployment_method == "manifests"
+      
+    - name: Deploy using Helm
+      block:
+        - name: Add Helm repositories
+          kubernetes.core.helm_repository:
+            name: "{{ item.name }}"
+            repo_url: "{{ item.url }}"
+          loop:
+            - name: bitnami
+              url: https://charts.bitnami.com/bitnami
+            - name: prometheus-community
+              url: https://prometheus-community.github.io/helm-charts
+            - name: grafana
+              url: https://grafana.github.io/helm-charts
+              
+        - name: Update Helm dependencies
+          command: helm dependency update
+          args:
+            chdir: "{{ playbook_dir }}/../helm/crypto-forecasting"
+            
+        - name: Deploy Helm chart
+          kubernetes.core.helm:
+            name: crypto-forecasting
+            chart_ref: "{{ playbook_dir }}/../helm/crypto-forecasting"
+            release_namespace: "{{ k8s_namespace }}"
+            create_namespace: true
+            values:
+              app:
+                environment: "{{ environment }}"
+                image:
+                  tag: "{{ image_tag }}"
+              frontend:
+                image:
+                  tag: "{{ image_tag }}"
+            wait: true
+            timeout: 10m
+            
+      when: deployment_method == "helm"
+      
+    - name: Wait for deployments to be ready
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ k8s_namespace }}"
+        name: "{{ item }}"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 300
+      loop:
+        - postgres
+        - redis
+        - backend
+        - frontend
+      ignore_errors: true
+      
+    - name: Get deployment status
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ k8s_namespace }}"
+      register: pod_status
+      
+    - name: Display pod status
+      debug:
+        msg: |
+          Pod {{ item.metadata.name }}: {{ item.status.phase }}
+          {% if item.status.phase != 'Running' and item.status.containerStatuses is defined %}
+          Container statuses:
+          {% for container in item.status.containerStatuses %}
+          - {{ container.name }}: {{ container.state }}
+          {% endfor %}
+          {% endif %}
+      loop: "{{ pod_status.resources }}"
+      
+    - name: Get service information
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Service
+        namespace: "{{ k8s_namespace }}"
+      register: service_info
+      
+    - name: Display access information
+      debug:
+        msg: |
+          === Deployment completed ===
+          Method: {{ deployment_method }}
+          Environment: {{ environment }}
+          Namespace: {{ k8s_namespace }}
+          
+          Services:
+          {% for service in service_info.resources %}
+          - {{ service.metadata.name }}: {{ service.spec.type }}
+          {% if service.spec.type == 'NodePort' %}
+            {% for port in service.spec.ports %}
+            - {{ port.name }}: {{ port.nodePort }}
+            {% endfor %}
+          {% endif %}
+          {% endfor %}
+          
+          Access commands:
+          kubectl port-forward -n {{ k8s_namespace }} svc/frontend 3000:3000
+          kubectl port-forward -n {{ k8s_namespace }} svc/backend 5000:5000
+          kubectl port-forward -n {{ k8s_namespace }} svc/grafana 3001:3001

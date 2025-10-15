@@ -1,0 +1,150 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: crypto-postgres
+    environment:
+      POSTGRES_DB: crypto_forecasting
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - crypto_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: crypto-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - crypto_network
+
+  ml-backend:
+    build:
+      context: .
+      dockerfile: app/Dockerfile.backend
+    container_name: crypto-ml-backend
+    environment:
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres123}@postgres:5432/crypto_forecasting
+      - REDIS_URL=redis://redis:6379/1
+      - PYTHONPATH=/app
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./logs:/app/logs
+    ports:
+      - "5000:5000"
+    networks:
+      - crypto_network
+    depends_on:
+      - postgres
+      - redis
+
+  frontend:
+    build:
+      context: .
+      dockerfile: app/Dockerfile.frontend
+    container_name: crypto-frontend
+    environment:
+      - BACKEND_URL=http://ml-backend:5000
+    volumes:
+      - ./app/frontend:/app/frontend
+    ports:
+      - "8501:8501"
+    networks:
+      - crypto_network
+    depends_on:
+      - ml-backend
+
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile.airflow
+    container_name: crypto-airflow-webserver
+    environment:
+      - AIRFLOW_HOME=/opt/airflow
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql://postgres:${POSTGRES_PASSWORD:-postgres123}@postgres:5432/crypto_forecasting
+      - PYTHONPATH=/opt/airflow
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./app:/opt/airflow/app
+      - ./data:/opt/airflow/data
+      - ./models:/opt/airflow/models
+    ports:
+      - "8080:8080"
+    networks:
+      - crypto_network
+    depends_on:
+      - postgres
+    command: >
+      bash -c "
+        airflow db init &&
+        airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@crypto-forecasting.com --password admin123 || true &&
+        airflow webserver --port 8080"
+
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile.airflow
+    container_name: crypto-airflow-scheduler
+    environment:
+      - AIRFLOW_HOME=/opt/airflow
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql://postgres:${POSTGRES_PASSWORD:-postgres123}@postgres:5432/crypto_forecasting
+      - PYTHONPATH=/opt/airflow
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./app:/opt/airflow/app
+      - ./data:/opt/airflow/data
+      - ./models:/opt/airflow/models
+    networks:
+      - crypto_network
+    depends_on:
+      - postgres
+      - airflow-webserver
+    command: airflow scheduler
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: crypto-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - crypto_network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: crypto-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - crypto_network
+    depends_on:
+      - prometheus
+
+networks:
+  crypto_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:

@@ -1,9 +1,9 @@
 
 
 PLOT_COLORS = {
-    'actual_data': "
-    'predictions': "
-    'split_lines': '
+    'actual_data': "#1f77b4",
+    'predictions': "#ff7f0e",
+    'split_lines': '#d62728'
 }
 
 PLOT_STYLE = {

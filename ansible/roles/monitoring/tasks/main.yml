@@ -1,0 +1,58 @@
+---
+# Tasks for setting up monitoring
+
+- name: Create monitoring directories
+  file:
+    path: "/opt/{{ project_name }}/monitoring"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+  become: yes
+
+- name: Copy Prometheus configuration
+  template:
+    src: prometheus.yml.j2
+    dest: "/opt/{{ project_name }}/monitoring/prometheus.yml"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0644'
+  become: yes
+
+- name: Copy Grafana configuration
+  template:
+    src: grafana.yml.j2
+    dest: "/opt/{{ project_name }}/monitoring/grafana.yml"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0644'
+  become: yes
+
+- name: Start monitoring services
+  docker_compose:
+    project_src: "/opt/{{ project_name }}/monitoring"
+    state: present
+  become: yes
+  become_user: "{{ app_user }}"
+
+- name: Wait for Prometheus to be ready
+  uri:
+    url: "http://localhost:9090/-/ready"
+    method: GET
+    status_code: 200
+  register: prometheus_health
+  until: prometheus_health.status == 200
+  retries: 30
+  delay: 5
+  ignore_errors: yes
+
+- name: Wait for Grafana to be ready
+  uri:
+    url: "http://localhost:3001/api/health"
+    method: GET
+    status_code: 200
+  register: grafana_health
+  until: grafana_health.status == 200
+  retries: 30
+  delay: 5
+  ignore_errors: yes

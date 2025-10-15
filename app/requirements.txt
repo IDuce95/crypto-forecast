@@ -16,3 +16,26 @@ matplotlib
 sqlalchemy
 psycopg2-binary
 alembic
+mlflow
+
+# Caching and performance
+redis
+redis-py-cluster
+cachetools
+
+# Deep Learning (PyTorch)
+torch
+torchvision
+torchaudio
+pytorch-lightning
+
+# Advanced optimization
+optuna
+sktime
+
+# Development and testing tools
+pytest
+mypy
+pylint
+pytest-cov
+httpx
