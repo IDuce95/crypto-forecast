@@ -66,10 +66,26 @@ class PredictionResponse:
 
 
 class ModelServing:
-        Initialize model serving system
+    def __init__(self, config: ServingConfig):
+        """Initialize model serving system
         
         Args:
             config: Serving configuration
+        """
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+        self.models = {}
+        self.model_versions = {}
+        self.performance_metrics = defaultdict(lambda: {"count": 0, "total_time": 0})
+        self.cache_manager = CacheManager()
+        self.model_lock = threading.RLock()
+        self.load_lock = threading.Lock()
+        self.traffic_split = config.traffic_split or {}
+        
+        # Load initial models
+        self._load_initial_models()
+        
+        # Start monitoring thread if enabled
         if self.config.enable_performance_monitoring:
             self.monitoring_thread = threading.Thread(
                 target=self._performance_monitoring_loop,

@@ -372,3 +372,4 @@ def validate_all_datasets(data_path: Path = None) -> Dict[str, ValidationResult]
     return results
 
 if __name__ == "__main__":
+    pass

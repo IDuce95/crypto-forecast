@@ -420,3 +420,4 @@ class PredictionGenerator:
         logger.info(f"Predictions saved to {file_path}")
 
 if __name__ == "__main__":
+    pass

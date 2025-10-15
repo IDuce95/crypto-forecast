@@ -271,3 +271,4 @@ def setup_datalake() -> DatalakeManager:
     return manager
 
 if __name__ == "__main__":
+    pass

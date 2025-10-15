@@ -14,7 +14,15 @@ from app.ml_preprocessor import DataPreprocessor, PreprocessingConfig, Preproces
 from app.ml_model_trainer import ModelTrainer, ModelConfig, MultiModelTrainer, ModelResults
 from app.ml_prediction_generator import PredictionGenerator, PredictionConfig, BatchPredictions
 from app.mlflow_manager import MLflowManager, setup_mlflow
-from app.pyspark_manager import PySparkManager, PySparkDataProcessor
+
+# Make PySpark optional
+try:
+    from app.pyspark_manager import PySparkManager, PySparkDataProcessor
+    PYSPARK_AVAILABLE = True
+except ImportError:
+    PYSPARK_AVAILABLE = False
+    PySparkManager = None
+    PySparkDataProcessor = None
 
 @dataclass
 class PipelineConfig:
@@ -490,3 +498,4 @@ def create_default_pipeline() -> MLPipeline:
     return MLPipeline(config)
 
 if __name__ == "__main__":
+    pass

@@ -180,3 +180,4 @@ def close_database() -> None:
         logger.info("Database connections closed")
 
 if __name__ == "__main__":
+    pass

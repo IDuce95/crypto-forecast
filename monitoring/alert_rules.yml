@@ -1,0 +1,231 @@
+groups:
+  - name: crypto_forecasting_alerts
+    interval: 30s
+    rules:
+      # API Health Alerts
+      - alert: APIDown
+        expr: up{job="ml-backend"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "API Backend is down"
+          description: "The ML Backend API ({{ $labels.instance }}) has been down for more than 5 minutes."
+
+      - alert: APIHighLatency
+        expr: http_request_duration_seconds{job="ml-backend", quantile="0.95"} > 2
+        for: 10m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "API response time is high"
+          description: "95th percentile API response time is above 2 seconds for {{ $labels.instance }}"
+
+      - alert: APIHighErrorRate
+        expr: rate(http_requests_total{job="ml-backend", status=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API error rate detected"
+          description: "API error rate is above 5% for {{ $labels.instance }}"
+
+      # Database Alerts
+      - alert: DatabaseDown
+        expr: up{job="postgres"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "PostgreSQL database is down"
+          description: "PostgreSQL database has been down for more than 5 minutes."
+
+      - alert: DatabaseHighConnections
+        expr: pg_stat_database_numbackends{job="postgres"} / pg_settings_max_connections > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: "PostgreSQL is using more than 80% of available connections"
+
+      - alert: DatabaseSlowQueries
+        expr: rate(pg_stat_statements_mean_exec_time{job="postgres"}[5m]) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database queries are slow"
+          description: "Average query execution time is above 1 second"
+
+      # Redis Cache Alerts
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: cache
+        annotations:
+          summary: "Redis cache is down"
+          description: "Redis cache server has been down for more than 5 minutes."
+
+      - alert: RedisHighMemoryUsage
+        expr: redis_memory_used_bytes{job="redis"} / redis_memory_max_bytes{job="redis"} > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Redis memory usage is high"
+          description: "Redis is using more than 90% of available memory"
+
+      - alert: RedisCacheHitRateLow
+        expr: redis_keyspace_hits_total{job="redis"} / (redis_keyspace_hits_total{job="redis"} + redis_keyspace_misses_total{job="redis"}) < 0.7
+        for: 15m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Redis cache hit rate is low"
+          description: "Cache hit rate is below 70%, indicating inefficient caching"
+
+      # Airflow Pipeline Alerts
+      - alert: AirflowSchedulerDown
+        expr: up{job="airflow"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: airflow
+        annotations:
+          summary: "Airflow scheduler is down"
+          description: "Airflow scheduler has been down for more than 5 minutes."
+
+      - alert: AirflowDAGFailure
+        expr: increase(airflow_dag_failed{job="airflow"}[1h]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: airflow
+        annotations:
+          summary: "Airflow DAG execution failed"
+          description: "DAG {{ $labels.dag_id }} has failed execution"
+
+      - alert: AirflowTaskQueueBacklog
+        expr: airflow_task_queue_size{job="airflow"} > 100
+        for: 15m
+        labels:
+          severity: warning
+          component: airflow
+        annotations:
+          summary: "Airflow task queue is building up"
+          description: "More than 100 tasks are queued for execution"
+
+      # Model Training Alerts
+      - alert: ModelTrainingFailed
+        expr: increase(model_training_failures_total[1h]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: ml
+        annotations:
+          summary: "Model training failed"
+          description: "Model training for {{ $labels.model_type }} has failed"
+
+      - alert: ModelAccuracyDegraded
+        expr: model_accuracy{job="ml-backend"} < 0.85
+        for: 30m
+        labels:
+          severity: warning
+          component: ml
+        annotations:
+          summary: "Model accuracy has degraded"
+          description: "Model {{ $labels.model_name }} accuracy is below 85%"
+
+      - alert: LongTrainingTime
+        expr: model_training_duration_seconds{job="ml-backend"} > 3600
+        for: 5m
+        labels:
+          severity: info
+          component: ml
+        annotations:
+          summary: "Model training is taking too long"
+          description: "Model {{ $labels.model_type }} training has been running for more than 1 hour"
+
+      # System Resource Alerts
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total[5m]) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is above 80% on {{ $labels.instance }}"
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is above 90% on {{ $labels.instance }}"
+
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 10m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Disk space is running low"
+          description: "Less than 10% disk space available on {{ $labels.instance }}"
+
+      # Kubernetes Specific Alerts (if deployed on K8s)
+      - alert: PodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: kubernetes
+        annotations:
+          summary: "Pod is crash looping"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is crash looping"
+
+      - alert: PodMemoryUsageHigh
+        expr: container_memory_usage_bytes{pod!=""} / container_spec_memory_limit_bytes > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          component: kubernetes
+        annotations:
+          summary: "Pod memory usage is high"
+          description: "Pod {{ $labels.pod }} is using more than 90% of its memory limit"
+
+      # Business Logic Alerts
+      - alert: NoPredictionsGenerated
+        expr: increase(predictions_generated_total[1h]) == 0
+        for: 1h
+        labels:
+          severity: warning
+          component: business
+        annotations:
+          summary: "No predictions generated in the last hour"
+          description: "The system has not generated any predictions in the last hour"
+
+      - alert: DataIngestionStopped
+        expr: increase(data_ingested_rows_total[6h]) == 0
+        for: 6h
+        labels:
+          severity: warning
+          component: business
+        annotations:
+          summary: "Data ingestion has stopped"
+          description: "No new data has been ingested in the last 6 hours"

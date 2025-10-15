@@ -51,50 +51,30 @@ class PySparkManager:
         self._init_spark_session()
 
     def _init_spark_session(self) -> None:
-        Load cryptocurrency data into Spark DataFrame
-
-        Args:
-            file_path: Path to data file
-            format: File format (csv, json, parquet)
-
-        Returns:
-            Spark DataFrame with crypto data
-        Create advanced features using PySpark for big data processing
-
-        Args:
-            df: Input DataFrame
-            symbol_col: Symbol column name
-            price_col: Price column name
-            volume_col: Volume column name
-            timestamp_col: Timestamp column name
-
-        Returns:
-            DataFrame with advanced features
+        """Initialize Spark session with configuration"""
         try:
-            window = Window.partitionBy(symbol_col).orderBy(timestamp_col)
-            window_period = window.rowsBetween(-period + 1, 0)
-
-            df_rsi = df.withColumn(
-                "price_diff", col(price_col) - lag(price_col, 1).over(window)
-            ).withColumn(
-                "gain", when(col("price_diff") > 0, col("price_diff")).otherwise(0)
-            ).withColumn(
-                "loss", when(col("price_diff") < 0, -col("price_diff")).otherwise(0)
-            )
-
-            df_rsi = df_rsi.withColumn(
-                "avg_gain", avg("gain").over(window_period)
-            ).withColumn(
-                "avg_loss", avg("loss").over(window_period)
-            )
-
-            rsi = 100 - (100 / (1 + col("avg_gain") / col("avg_loss")))
-
-            return rsi
-
+            from pyspark.sql import SparkSession
+            
+            builder = SparkSession.builder \
+                .appName(self.app_name) \
+                .master(self.master) \
+                .config("spark.executor.memory", self.executor_memory) \
+                .config("spark.driver.memory", self.driver_memory) \
+                .config("spark.executor.cores", str(self.executor_cores))
+            
+            # Add additional configurations
+            builder = builder.config("spark.sql.adaptive.enabled", "true") \
+                .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
+                .config("spark.sql.execution.arrow.pyspark.enabled", "true")
+            
+            self.spark = builder.getOrCreate()
+            self.spark.sparkContext.setLogLevel("WARN")
+            
+            self.logger.info(f"Spark session created: {self.app_name}")
         except Exception as e:
-            self.logger.error(f"Failed to calculate RSI: {e}")
-            return lit(50.0)  # Return neutral RSI on error
+            self.logger.error(f"Failed to create Spark session: {e}")
+            # Create a minimal local session as fallback
+            self.spark = SparkSession.builder.appName(self.app_name).master("local[1]").getOrCreate()
 
     def process_large_dataset(self, df: DataFrame,
                              batch_size: int = 10000) -> DataFrame:

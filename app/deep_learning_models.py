@@ -14,13 +14,31 @@ import sys
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+import logging
 from logger_manager import LoggerManager
 from cache_manager import CacheManager
+from mlflow_manager import MLflowManager
 
 
 @dataclass
 class DeepLearningConfig:
-    
+    model_type: str = "lstm"  # lstm, gru, transformer
+    sequence_length: int = 30
+    prediction_horizon: int = 1
+    hidden_size: int = 128
+    num_layers: int = 2
+    dropout: float = 0.2
+    learning_rate: float = 0.001
+    batch_size: int = 32
+    num_epochs: int = 100
+    early_stopping_patience: int = 10
+    use_attention: bool = True
+    device: str = "cuda"
+    target_column: str = "close"
+    feature_columns: Optional[List[str]] = None
+
+
+class CryptoTimeSeriesDataset(Dataset):
     def __init__(self, data: pd.DataFrame, config: DeepLearningConfig):
         self.config = config
         self.data = data.copy()
@@ -44,11 +62,70 @@ class DeepLearningConfig:
         self.sequences, self.targets = self._create_sequences()
         
     def _create_sequences(self) -> Tuple[np.ndarray, np.ndarray]:
-        return self.target_scaler.inverse_transform(scaled_target.reshape(-1, 1)).flatten()
+        sequences = []
+        targets = []
+        
+        for i in range(len(self.scaled_features) - self.config.sequence_length - self.config.prediction_horizon + 1):
+            seq = self.scaled_features[i:i + self.config.sequence_length]
+            target = self.scaled_target[i + self.config.sequence_length:i + self.config.sequence_length + self.config.prediction_horizon]
+            sequences.append(seq)
+            targets.append(target.flatten())
+        
+        return np.array(sequences), np.array(targets)
+    
+    def __len__(self):
+        return len(self.sequences)
+    
+    def __getitem__(self, idx):
+        return torch.FloatTensor(self.sequences[idx]), torch.FloatTensor(self.targets[idx])
+    
+    def inverse_transform_predictions(self, scaled_predictions: np.ndarray) -> np.ndarray:
+        return self.target_scaler.inverse_transform(scaled_predictions.reshape(-1, 1)).flatten()
 
 
 class LSTMModel(nn.Module):
-    
+    def __init__(self, config: DeepLearningConfig, input_size: int):
+        super(LSTMModel, self).__init__()
+        self.config = config
+        
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=config.hidden_size,
+            num_layers=config.num_layers,
+            dropout=config.dropout if config.num_layers > 1 else 0,
+            bidirectional=False,
+            batch_first=True
+        )
+        
+        lstm_output_size = config.hidden_size
+        
+        if config.use_attention:
+            self.attention = nn.MultiheadAttention(
+                embed_dim=lstm_output_size,
+                num_heads=8,
+                dropout=config.dropout,
+                batch_first=True
+            )
+        
+        self.dropout = nn.Dropout(config.dropout)
+        self.fc = nn.Linear(lstm_output_size, config.prediction_horizon)
+        
+    def forward(self, x):
+        lstm_out, _ = self.lstm(x)
+        
+        if self.config.use_attention:
+            attended_out, _ = self.attention(lstm_out, lstm_out, lstm_out)
+            out = attended_out[:, -1, :]
+        else:
+            out = lstm_out[:, -1, :]
+        
+        out = self.dropout(out)
+        out = self.fc(out)
+        
+        return out
+
+
+class GRUModel(nn.Module):
     def __init__(self, config: DeepLearningConfig, input_size: int):
         super(GRUModel, self).__init__()
         self.config = config
@@ -58,11 +135,11 @@ class LSTMModel(nn.Module):
             hidden_size=config.hidden_size,
             num_layers=config.num_layers,
             dropout=config.dropout if config.num_layers > 1 else 0,
-            bidirectional=config.bidirectional,
+            bidirectional=False,
             batch_first=True
         )
         
-        gru_output_size = config.hidden_size * (2 if config.bidirectional else 1)
+        gru_output_size = config.hidden_size
         
         if config.use_attention:
             self.attention = nn.MultiheadAttention(
@@ -91,6 +168,36 @@ class LSTMModel(nn.Module):
 
 
 class TransformerModel(nn.Module):
+    def __init__(self, config: DeepLearningConfig, input_size: int):
+        super(TransformerModel, self).__init__()
+        self.config = config
+        
+        # Input projection
+        self.input_projection = nn.Linear(input_size, config.hidden_size)
+        
+        # Positional encoding
+        self.pos_encoding = self._create_positional_encoding(
+            config.sequence_length, config.hidden_size
+        )
+        
+        # Transformer layers
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=config.hidden_size,
+            nhead=8,
+            dim_feedforward=config.hidden_size * 4,
+            dropout=config.dropout,
+            batch_first=True
+        )
+        
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=config.num_layers
+        )
+        
+        self.dropout = nn.Dropout(config.dropout)
+        self.fc = nn.Linear(config.hidden_size, config.prediction_horizon)
+    
+    def _create_positional_encoding(self, seq_len: int, model_dim: int):
         pe = torch.zeros(seq_len, model_dim)
         position = torch.arange(0, seq_len, dtype=torch.float).unsqueeze(1)
         
@@ -119,10 +226,19 @@ class TransformerModel(nn.Module):
 
 
 class DeepLearningTrainer:
-        Initialize trainer
+    def __init__(self, config: DeepLearningConfig):
+        """Initialize trainer
         
         Args:
             config: Deep learning configuration
+        """
+        self.config = config
+        self.device = torch.device(config.device if torch.cuda.is_available() else 'cpu')
+        self.logger = logging.getLogger(__name__)
+        self.cache_manager = CacheManager()
+        self.mlflow_manager = MLflowManager("deep-learning")
+        
+    def _create_model(self, input_size: int):
         if self.config.model_type.lower() == "lstm":
             model = LSTMModel(self.config, input_size)
         elif self.config.model_type.lower() == "gru":

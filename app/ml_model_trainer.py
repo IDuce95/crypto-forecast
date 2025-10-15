@@ -438,3 +438,4 @@ class MultiModelTrainer:
         return best_model_name, self.results[best_model_name]
 
 if __name__ == "__main__":
+    pass

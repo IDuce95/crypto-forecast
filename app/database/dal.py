@@ -356,3 +356,4 @@ def migrate_csv_data_to_database() -> None:
             print(f"✗ {symbol}: {details.get('error', 'Unknown error')}")
 
 if __name__ == "__main__":
+    pass

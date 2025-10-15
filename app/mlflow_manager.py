@@ -344,3 +344,4 @@ def setup_mlflow(experiment_name: str = "crypto-forecasting") -> MLflowManager:
     return MLflowManager(experiment_name=experiment_name)
 
 if __name__ == "__main__":
+    pass
